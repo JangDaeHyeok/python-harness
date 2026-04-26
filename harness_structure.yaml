@@ -1,0 +1,29 @@
+# 하네스 구조 분석 규칙
+# ADR과 연계하여 아키텍처 규칙을 기계적으로 강제한다.
+
+rules:
+  # ADR-0001: 에이전트 레이어 의존성 방향
+  - name: dependency_direction
+    type: dependency_direction
+    source: harness/sensors
+    forbidden_imports:
+      - harness.agents
+    description: "센서는 에이전트에 의존해서는 안 된다 (단방향 의존성)"
+
+  # ADR-0002: 필수 파일 존재 확인
+  - name: required_files
+    type: required_files
+    files:
+      - CLAUDE.md
+      - harness_structure.yaml
+      - docs/adr/0001-three-agent-architecture.md
+    description: "프로젝트 필수 파일이 존재해야 한다"
+
+  # 코드 패턴 규칙: print 디버깅 금지
+  - name: no_print_debug
+    type: forbidden_pattern
+    pattern: "^\\s*print\\("
+    directories:
+      - harness
+    message: "print() 대신 logging을 사용하세요"
+    severity: warning

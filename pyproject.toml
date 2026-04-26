@@ -1,0 +1,65 @@
+[project]
+name = "python-harness"
+version = "0.1.0"
+description = "AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.52.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.11.0",
+    "mypy>=1.15",
+]
+
+[project.scripts]
+harness = "scripts.run_harness:main"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["harness"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "anthropic.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.hatch.build.targets.wheel]
+packages = ["harness"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
