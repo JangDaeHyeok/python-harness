@@ -12,17 +12,17 @@ class TestAgentConfig:
     def test_default_config(self) -> None:
         config = AgentConfig(name="test")
         assert config.name == "test"
-        assert config.model == "claude-sonnet-4-20250514"
+        assert config.model == "claude-sonnet-4-6"
         assert config.max_tokens == 16000
         assert config.tools == []
 
     def test_custom_config(self) -> None:
         config = AgentConfig(
             name="custom",
-            model="claude-opus-4-20250514",
+            model="claude-opus-4-6",
             temperature=0.2,
         )
-        assert config.model == "claude-opus-4-20250514"
+        assert config.model == "claude-opus-4-6"
         assert config.temperature == 0.2
 
 

@@ -116,7 +116,9 @@ class HarnessPipeline:
         structure: StructureResult,
         tests: TestResult,
     ) -> str:
-        icon = lambda passed: "✅" if passed else "❌"  # noqa: E731
+        def icon(passed: bool) -> str:
+            return "✅" if passed else "❌"
+
         lines = [
             "# 파이프라인 결과\n",
             f"{icon(lint.passed)} 린트: {lint.total_errors}개 에러, {lint.total_warnings}개 경고",

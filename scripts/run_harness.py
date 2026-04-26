@@ -6,7 +6,7 @@
 
     python scripts/run_harness.py \
         --project-dir ./my-project \
-        --model claude-sonnet-4-20250514 \
+        --model claude-sonnet-4-6 \
         --max-retries 3 \
         "브라우저에서 동작하는 DAW를 만들어주세요"
 """
@@ -36,7 +36,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="하네스 엔지니어링 프레임워크 실행")
     parser.add_argument("prompt", help="프로젝트 설명 (1~4문장)")
     parser.add_argument("--project-dir", default="./project", help="프로젝트 디렉터리")
-    parser.add_argument("--model", default="claude-sonnet-4-20250514", help="사용할 모델")
+    parser.add_argument("--model", default="claude-sonnet-4-6", help="사용할 모델")
     parser.add_argument("--max-retries", type=int, default=3, help="스프린트당 최대 재시도")
     parser.add_argument("--max-sprints", type=int, default=15, help="최대 스프린트 수")
     parser.add_argument("--app-url", default="http://localhost:3000", help="앱 URL")

@@ -9,7 +9,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-import anthropic
+from harness.tools.api_client import (
+    DEFAULT_MODEL,
+    APIError,
+    HarnessClient,
+    RateLimitError,
+    get_model_cost,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,7 @@ class AgentConfig:
     """에이전트 설정."""
 
     name: str
-    model: str = "claude-sonnet-4-20250514"
+    model: str = DEFAULT_MODEL
     max_tokens: int = 16000
     temperature: float = 0.7
     system_prompt: str = ""
@@ -43,7 +49,7 @@ class BaseAgent(ABC):
     모든 에이전트의 기본 클래스.
 
     핵심 책임:
-    1. Anthropic API와의 통신
+    1. API 엔드포인트와의 통신
     2. 컨텍스트 관리 (안정 접두어 + 동적 접미어)
     3. 도구 실행 루프 (ReAct 패턴)
     4. 에러 핸들링 및 재시도
@@ -51,7 +57,7 @@ class BaseAgent(ABC):
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
-        self.client = anthropic.Anthropic()
+        self.client = HarnessClient()
         self.conversation_history: list[dict[str, Any]] = []
         self.tool_results: list[dict[str, Any]] = []
         self._token_usage = {"input": 0, "output": 0}
@@ -76,13 +82,7 @@ class BaseAgent(ABC):
 
         max_turns = 50
         for _turn in range(max_turns):
-            try:
-                response = self._call_api()
-            except anthropic.RateLimitError:
-                logger.warning("[%s] Rate limit. 60초 대기...", self.config.name)
-                time.sleep(60)
-                response = self._call_api()
-
+            response = self._call_api_with_retry()
             self._track_tokens(response)
 
             if response.stop_reason == "tool_use":
@@ -106,8 +106,30 @@ class BaseAgent(ABC):
 
         raise RuntimeError(f"[{self.config.name}] 최대 턴 수({max_turns}) 초과")
 
+    def _call_api_with_retry(self) -> Any:
+        """지수 백오프를 적용한 API 호출."""
+        last_error: Exception | None = None
+        for attempt in range(self.config.max_retries):
+            try:
+                return self._call_api()
+            except RateLimitError as e:
+                wait_time = min(60 * (2 ** attempt), 300)
+                logger.warning(
+                    "[%s] Rate limit (시도 %d/%d). %d초 대기...",
+                    self.config.name, attempt + 1, self.config.max_retries, wait_time,
+                )
+                time.sleep(wait_time)
+                last_error = e
+            except APIError as e:
+                logger.error("[%s] API 에러: %s", self.config.name, e)
+                last_error = e
+                break
+        raise RuntimeError(
+            f"[{self.config.name}] API 호출 실패: {last_error}"
+        ) from last_error
+
     def _call_api(self) -> Any:
-        """Anthropic API 호출. 안정 접두어를 유지하여 KV-cache 효율을 높인다."""
+        """API 호출."""
         kwargs: dict[str, Any] = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
@@ -117,7 +139,7 @@ class BaseAgent(ABC):
         }
         if self.config.tools:
             kwargs["tools"] = self.config.tools
-        return self.client.messages.create(**kwargs)
+        return self.client.create_message(**kwargs)
 
     def _build_user_content(
         self, message: str, context: dict[str, Any] | None
@@ -163,7 +185,9 @@ class BaseAgent(ABC):
 
     @property
     def total_cost(self) -> float:
-        """현재까지의 예상 비용(USD). Claude Sonnet 4 기준."""
-        input_cost = self._token_usage["input"] * 3.0 / 1_000_000
-        output_cost = self._token_usage["output"] * 15.0 / 1_000_000
-        return input_cost + output_cost
+        """현재까지의 예상 비용(USD). 모델별 가격 적용."""
+        return get_model_cost(
+            self.config.model,
+            self._token_usage["input"],
+            self._token_usage["output"],
+        )

@@ -92,7 +92,7 @@ class ProductSpec:
 class PlannerAgent(BaseAgent):
     """제품 스펙을 생성하는 Planner 에이전트."""
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514") -> None:
+    def __init__(self, model: str = "claude-sonnet-4-6") -> None:
         config = AgentConfig(
             name="planner",
             model=model,

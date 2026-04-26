@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import anthropic
+from harness.tools.api_client import DEFAULT_MODEL, HarnessClient
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,11 @@ class CodeReviewer:
     def __init__(
         self,
         project_dir: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = DEFAULT_MODEL,
     ) -> None:
         self.project_dir = Path(project_dir)
         self.model = model
-        self.client = anthropic.Anthropic()
+        self.client = HarnessClient()
 
     def review_diff(self, base_branch: str = "main") -> ReviewResult:
         """현재 브랜치의 diff를 리뷰한다."""
@@ -107,11 +107,10 @@ class CodeReviewer:
         return self._review(diff)
 
     def _review(self, diff: str) -> ReviewResult:
-        # diff가 너무 길면 잘라냄
         if len(diff) > 50000:
             diff = diff[:50000] + "\n\n... [diff 잘림: 50000자 초과]"
 
-        response = self.client.messages.create(
+        response = self.client.create_message(
             model=self.model,
             max_tokens=8000,
             temperature=0.2,

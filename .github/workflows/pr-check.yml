@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install mypy pyyaml pydantic anthropic
+      - run: pip install mypy pyyaml pydantic
       - run: mypy harness --ignore-missing-imports
 
   test:
@@ -66,10 +66,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install anthropic
+      - run: pip install -e .
       - name: Run AI Review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: python scripts/pr_review.py

@@ -186,17 +186,23 @@ class StructureAnalyzer:
 
         for py_file in layer_path.rglob("*.py"):
             content = py_file.read_text(encoding="utf-8", errors="ignore")
-            for _i, line in enumerate(content.splitlines(), 1):
+            rel_path = str(py_file.relative_to(self.project_dir))
+            for i, line in enumerate(content.splitlines(), 1):
                 match = re.match(r"^(?:from|import)\s+([\w.]+)", line)
                 if not match:
                     continue
                 module = match.group(1).split(".")[0]
-                # 표준 라이브러리와 허용된 import는 통과
                 if module in allowed_imports or module.startswith("_"):
                     continue
-                # 자기 자신 레이어 내부 import는 허용
                 if module == layer_dir.split("/")[0]:
                     continue
+                violations.append(StructureViolation(
+                    rule_name=rule.get("name", "layer_isolation"),
+                    file=rel_path,
+                    line=i,
+                    message=f"'{layer_dir}'에서 허용되지 않은 모듈 '{module}'을 import합니다.",
+                    severity="error",
+                ))
 
         return violations
 

@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크"
 requires-python = ">=3.11"
 dependencies = [
-    "anthropic>=0.52.0",
     "pyyaml>=6.0",
     "pydantic>=2.0",
 ]
@@ -50,7 +49,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = "anthropic.*"
+module = "harness.tools.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

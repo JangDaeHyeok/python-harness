@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
+from harness.tools.api_client import DEFAULT_MODEL
+from harness.tools.shell import run_command_safe, validate_path
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ DEFAULT_CRITERIA = [
 class EvaluatorAgent(BaseAgent):
     """스프린트 결과물을 평가하는 Evaluator 에이전트."""
 
-    def __init__(self, project_dir: str, model: str = "claude-sonnet-4-20250514") -> None:
+    def __init__(self, project_dir: str, model: str = DEFAULT_MODEL) -> None:
         config = AgentConfig(
             name="evaluator",
             model=model,
@@ -142,7 +143,19 @@ class EvaluatorAgent(BaseAgent):
             cleaned = cleaned.split("\n", 1)[1]
             cleaned = cleaned.rsplit("```", 1)[0]
 
-        data = json.loads(cleaned)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            logger.warning("Evaluator 응답 파싱 실패, 기본 실패 결과 반환")
+            return EvaluationResult(
+                sprint_number=0,
+                passed=False,
+                overall_score=0.0,
+                criteria_scores=[],
+                bugs_found=[],
+                summary="평가 응답 파싱 실패",
+                detailed_feedback=f"원본 응답:\n{response[:2000]}",
+            )
 
         criteria_scores = [
             EvaluationCriteria(
@@ -153,17 +166,17 @@ class EvaluatorAgent(BaseAgent):
                 score=c["score"],
                 feedback=c["feedback"],
             )
-            for c in data["criteria"]
+            for c in data.get("criteria", [])
         ]
 
         return EvaluationResult(
-            sprint_number=data["sprint_number"],
-            passed=data["passed"],
-            overall_score=data["overall_score"],
+            sprint_number=data.get("sprint_number", 0),
+            passed=data.get("passed", False),
+            overall_score=data.get("overall_score", 0.0),
             criteria_scores=criteria_scores,
             bugs_found=data.get("bugs_found", []),
-            summary=data["summary"],
-            detailed_feedback=data["detailed_feedback"],
+            summary=data.get("summary", ""),
+            detailed_feedback=data.get("detailed_feedback", ""),
         )
 
     def _run_tool(self, tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -180,22 +193,12 @@ class EvaluatorAgent(BaseAgent):
         return f"Error: Unknown tool '{tool_name}'"
 
     def _run_command(self, command: str) -> str:
-        try:
-            result = subprocess.run(
-                command, shell=True, cwd=str(self.project_dir),
-                capture_output=True, text=True, timeout=120,
-            )
-            output = ""
-            if result.stdout:
-                output += f"STDOUT:\n{result.stdout[:3000]}\n"
-            if result.stderr:
-                output += f"STDERR:\n{result.stderr[:3000]}\n"
-            output += f"Return code: {result.returncode}"
-            return output
-        except subprocess.TimeoutExpired:
-            return "Error: 타임아웃 (120초)"
+        return run_command_safe(command, str(self.project_dir))
 
     def _read_file(self, path: str) -> str:
+        is_safe, reason = validate_path(path, self.project_dir)
+        if not is_safe:
+            return f"Error: {reason}"
         full_path = self.project_dir / path
         if not full_path.exists():
             return f"Error: 파일을 찾을 수 없음 - {path}"
@@ -246,12 +249,11 @@ class EvaluatorAgent(BaseAgent):
             "- 각 기능의 검증 기준\n"
             "- 성공/실패 판정 기준"
         )
-        # negotiate_contract returns raw text, not EvaluationResult
         self.conversation_history.append({
             "role": "user",
             "content": message,
         })
-        response = self._call_api()
+        response = self._call_api_with_retry()
         self._track_tokens(response)
         text = self._extract_text(response)
         self.conversation_history.append({

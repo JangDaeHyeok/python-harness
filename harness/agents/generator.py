@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
+from harness.tools.api_client import DEFAULT_MODEL
+from harness.tools.shell import run_command_safe, validate_path
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,7 @@ IGNORED_DIRS = {"node_modules", ".git", "__pycache__", ".next", "dist", "build",
 class GeneratorAgent(BaseAgent):
     """스프린트 단위로 기능을 구현하는 Generator 에이전트."""
 
-    def __init__(self, project_dir: str, model: str = "claude-sonnet-4-20250514") -> None:
+    def __init__(self, project_dir: str, model: str = DEFAULT_MODEL) -> None:
         config = AgentConfig(
             name="generator",
             model=model,
@@ -130,12 +132,18 @@ class GeneratorAgent(BaseAgent):
         return f"Error: Unknown tool '{tool_name}'"
 
     def _write_file(self, path: str, content: str) -> str:
+        is_safe, reason = validate_path(path, self.project_dir)
+        if not is_safe:
+            return f"Error: {reason}"
         full_path = self.project_dir / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
         return f"파일 작성 완료: {path} ({len(content)} bytes)"
 
     def _read_file(self, path: str) -> str:
+        is_safe, reason = validate_path(path, self.project_dir)
+        if not is_safe:
+            return f"Error: {reason}"
         full_path = self.project_dir / path
         if not full_path.exists():
             return f"Error: 파일을 찾을 수 없음 - {path}"
@@ -145,27 +153,8 @@ class GeneratorAgent(BaseAgent):
         return content
 
     def _run_command(self, command: str, cwd: str | None = None) -> str:
-        work_dir = self.project_dir / cwd if cwd else self.project_dir
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=str(work_dir),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            output = ""
-            if result.stdout:
-                output += f"STDOUT:\n{result.stdout[:3000]}\n"
-            if result.stderr:
-                output += f"STDERR:\n{result.stderr[:3000]}\n"
-            output += f"Return code: {result.returncode}"
-            return output
-        except subprocess.TimeoutExpired:
-            return "Error: 명령 실행 타임아웃 (120초)"
-        except Exception as e:
-            return f"Error: {e}"
+        work_dir = str(self.project_dir / cwd) if cwd else str(self.project_dir)
+        return run_command_safe(command, work_dir)
 
     def _git_commit(self, message: str) -> str:
         try:
