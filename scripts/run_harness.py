@@ -26,6 +26,33 @@ from harness.agents.orchestrator import HarnessConfig, HarnessOrchestrator
 from harness.tools.api_client import ENDPOINT_ENV_VAR
 
 
+def _checkpoint_exists(project_dir: Path, resume_run_id: str) -> bool:
+    """재개 대상 체크포인트가 해당 프로젝트 디렉터리에 있는지 확인한다."""
+    checkpoints_dir = project_dir / ".harness" / "checkpoints"
+    if resume_run_id == "latest":
+        return (checkpoints_dir / "latest.json").exists()
+    return (checkpoints_dir / f"{resume_run_id}.json").exists()
+
+
+def _resolve_project_dir(
+    project_dir_arg: str | None,
+    mode: str,
+    resume_run_id: str,
+) -> tuple[Path, str]:
+    """CLI 옵션 조합에 따라 프로젝트 디렉터리와 실행 모드를 결정한다."""
+    if project_dir_arg:
+        return Path(project_dir_arg).resolve(), mode
+
+    current_dir = Path(".").resolve()
+    if mode == "modify":
+        return current_dir, mode
+
+    if resume_run_id and _checkpoint_exists(current_dir, resume_run_id):
+        return current_dir, "modify"
+
+    return Path("./project"), mode
+
+
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -80,10 +107,13 @@ def main() -> None:
     if args.api_endpoint:
         os.environ[ENDPOINT_ENV_VAR] = args.api_endpoint
 
-    if args.mode == "modify":
-        project_dir = Path(args.project_dir).resolve() if args.project_dir else Path(".").resolve()
-    else:
-        project_dir = Path(args.project_dir) if args.project_dir else Path("./project")
+    resume_run_id = ""
+    if args.resume:
+        resume_run_id = "latest"
+    elif args.run_id:
+        resume_run_id = args.run_id
+
+    project_dir, mode = _resolve_project_dir(args.project_dir, args.mode, resume_run_id)
     project_dir.mkdir(parents=True, exist_ok=True)
 
     config = HarnessConfig(
@@ -93,18 +123,12 @@ def main() -> None:
         max_total_sprints=args.max_sprints,
         app_url=args.app_url,
         enable_context_reset=not args.no_context_reset,
-        mode=args.mode,
+        mode=mode,
         use_worktree_isolation=args.use_worktree,
         worktree_sync_excludes=args.worktree_sync_exclude,
     )
 
     orchestrator = HarnessOrchestrator(config)
-
-    resume_run_id = ""
-    if args.resume:
-        resume_run_id = "latest"
-    elif args.run_id:
-        resume_run_id = args.run_id
 
     if not resume_run_id and not args.prompt:
         parser.error("prompt가 필요합니다. 중단된 실행을 재개하려면 --resume 또는 --run-id를 사용하세요.")

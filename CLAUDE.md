@@ -11,6 +11,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크.
 - CRITICAL: 센서(sensors/)는 에이전트(agents/)에 의존 금지 (단방향)
 - CRITICAL: 모든 아키텍처 결정은 docs/adr/에 기록
 - 모든 public 함수에 타입 힌트 필수
+- 수정 모드(`--mode modify`)는 기존 코드베이스 최소 변경, 기존 패턴 재사용, 프로젝트 정책 준수를 기본 원칙으로 한다
 
 ## 프로젝트 구조
 ```
@@ -22,21 +23,24 @@ harness/
 ├── pipeline/      # 통합 파이프라인
 ├── review/        # 리뷰 워크플로: 산출물, 컨벤션, 기준, 설계의도, PR본문, 반영로그, worktree
 ├── guides/        # 시스템 프롬프트, 규칙 엔진
-├── context/       # 세션 상태, 체크포인트, 컨텍스트 관리
+├── context/       # 세션 상태, 체크포인트, modify 컨텍스트, 프로젝트 정책
 ├── contracts/     # 스프린트 계약 모델(SprintContract)과 저장소(ContractStore)
 └── tools/         # 파일/셸/Git 도구
 ```
 
 ## 문서 맵
-- `docs/adr/` — Architecture Decision Records (0001~0007)
+- `docs/adr/` — Architecture Decision Records (0001~0008)
 - `docs/code-convention.yaml` — 코드 컨벤션 규칙 (ConventionLoader로 로드)
 - `harness_structure.yaml` — 자동 검증되는 아키텍처 규칙
 - `.harness/review-artifacts/{branch}/` — 브랜치별 리뷰 산출물
+- `.harness/project-policy.yaml` — modify 모드 프로젝트 정책(선택)
 
 ## 명령어
 ```bash
 pip install -e ".[dev]"           # 개발 의존성 설치
-python scripts/run_harness.py "프롬프트"  # 하네스 실행
+python scripts/run_harness.py "프롬프트"  # create 모드: 새 프로젝트 생성
+python scripts/run_harness.py --mode modify "수정 요청"  # modify 모드: 현재 코드베이스 수정
+python scripts/run_harness.py --resume  # 현재 디렉터리 체크포인트가 있으면 modify 실행 재개
 python scripts/create_pr_body.py --base main  # PR 본문 생성
 python scripts/create_pr_body.py --base main --output pr-body.md
 ruff check .                      # 린트
@@ -60,6 +64,12 @@ python scripts/check_structure.py # 구조 분석
 ## 체크포인트 경로
 - `.harness/checkpoints/{run_id}.json` — 실행별 체크포인트
 - `.harness/checkpoints/latest.json` — 최근 실행 포인터
+- `--project-dir` 없이 `--resume`/`--run-id`를 사용할 때 현재 디렉터리에 체크포인트가 있으면 현재 디렉터리의 modify 실행으로 재개한다
+
+## 수정 모드 컨텍스트
+- 현재 git 브랜치, staged/unstaged diff, 변경 파일 목록을 수집한다
+- 설계 의도, 코드 컨벤션, ADR, 구조 규칙, 최근 ruff/mypy 요약을 Planner에게 전달한다
+- `.harness/project-policy.yaml`이 있으면 컨벤션·ADR·구조 규칙 경로와 프로젝트 정책을 반영한다
 
 ## 품질 기준
 - ruff 에러 0개

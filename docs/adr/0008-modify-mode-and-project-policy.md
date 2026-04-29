@@ -35,6 +35,18 @@ modify 모드에서는:
 4. Generator는 기존 파일 수정에 집중한다.
 5. Evaluator는 기존 기능 보존과 변경 정확성을 평가한다.
 
+### 1-1. 수정 모드 체크포인트 재개
+
+modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
+따라서 modify 실행이 중단된 뒤 사용자가 저장소 루트에서 자연스럽게
+`python scripts/run_harness.py --resume` 또는 `--run-id <id>`를 실행하면
+현재 디렉터리의 `.harness/checkpoints/`를 우선 확인한다.
+
+- `--project-dir`이 명시되면 항상 그 값을 우선한다.
+- `--mode modify`가 명시되면 현재 디렉터리를 기본 프로젝트 디렉터리로 사용한다.
+- `--project-dir`이 없고 현재 디렉터리에 대상 체크포인트가 있으면 현재 디렉터리의 modify 실행으로 재개한다.
+- 그 외 create 기본 실행은 기존처럼 `./project`를 사용한다.
+
 ### 2. 프로젝트 정책 파일 (.harness/project-policy.yaml)
 
 프로젝트별 하네스 동작을 커스터마이즈하는 정책 파일을 도입한다.
@@ -60,10 +72,12 @@ context → agents/sensors/review 의존 금지.
 - 프로젝트별 정책 관리로 다양한 프로젝트에 적응 가능
 - 기존 create 모드와 완전히 하위 호환
 - 기존 3-에이전트 루프(Planner → Generator → Evaluator)를 재사용
+- modify 실행 중단 후 `--resume`만으로 현재 저장소의 체크포인트를 자연스럽게 재개 가능
 
 ### 부정적
 - 모드별 분기 로직이 Orchestrator에 추가됨
 - 수정 모드 프롬프트를 별도로 유지보수해야 함
+- CLI가 재개 시 현재 디렉터리 체크포인트 존재 여부를 확인하므로 project-dir 해석 규칙이 약간 복잡해짐
 
 ## 강제 규칙
 
