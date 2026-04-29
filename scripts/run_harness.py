@@ -38,11 +38,21 @@ def setup_logging(verbose: bool = False) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="하네스 엔지니어링 프레임워크 실행")
     parser.add_argument("prompt", nargs="?", default="", help="프로젝트 설명 (1~4문장)")
-    parser.add_argument("--project-dir", default="./project", help="프로젝트 디렉터리")
+    parser.add_argument(
+        "--project-dir",
+        default=None,
+        help="프로젝트 디렉터리 (create 기본값: ./project, modify 기본값: 현재 디렉터리)",
+    )
     parser.add_argument("--model", default="claude-sonnet-4-6", help="사용할 모델")
     parser.add_argument(
         "--api-endpoint",
         help=f"API 엔드포인트. 미지정 시 {ENDPOINT_ENV_VAR} 환경변수를 사용",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["create", "modify"],
+        default="create",
+        help="실행 모드: create(새 프로젝트 생성) 또는 modify(기존 코드베이스 수정)",
     )
     parser.add_argument("--max-retries", type=int, default=3, help="스프린트당 최대 재시도")
     parser.add_argument("--max-sprints", type=int, default=15, help="최대 스프린트 수")
@@ -70,7 +80,10 @@ def main() -> None:
     if args.api_endpoint:
         os.environ[ENDPOINT_ENV_VAR] = args.api_endpoint
 
-    project_dir = Path(args.project_dir)
+    if args.mode == "modify":
+        project_dir = Path(args.project_dir).resolve() if args.project_dir else Path(".").resolve()
+    else:
+        project_dir = Path(args.project_dir) if args.project_dir else Path("./project")
     project_dir.mkdir(parents=True, exist_ok=True)
 
     config = HarnessConfig(
@@ -80,6 +93,7 @@ def main() -> None:
         max_total_sprints=args.max_sprints,
         app_url=args.app_url,
         enable_context_reset=not args.no_context_reset,
+        mode=args.mode,
         use_worktree_isolation=args.use_worktree,
         worktree_sync_excludes=args.worktree_sync_exclude,
     )

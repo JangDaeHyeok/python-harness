@@ -17,6 +17,7 @@ from harness.agents.orchestrator import (
     WorktreeChange,
     WorktreeSyncError,
 )
+from harness.context.modify_context import ModifyContext
 from harness.review.worktree import WorktreeError
 
 if TYPE_CHECKING:
@@ -35,6 +36,7 @@ class TestHarnessConfig:
         assert config.app_url == "http://localhost:3000"
         assert config.enable_context_reset is True
         assert config.save_artifacts is True
+        assert config.mode == "create"
         assert config.use_worktree_isolation is False
         assert config.worktree_sync_excludes == []
 
@@ -45,6 +47,10 @@ class TestHarnessConfig:
     def test_custom_excludes(self) -> None:
         config = HarnessConfig(project_dir=".", worktree_sync_excludes=["tmp", "cache"])
         assert "tmp" in config.worktree_sync_excludes
+
+    def test_modify_mode(self) -> None:
+        config = HarnessConfig(project_dir=".", mode="modify")
+        assert config.mode == "modify"
 
 
 # ---------------------------------------------------------------------------
@@ -469,3 +475,118 @@ class TestCriteriaMdConnection:
             # 빈 문자열이라도 키워드 인수로 전달됨
             call_kwargs = mock_eval.evaluate_sprint.call_args
             assert "criteria_md" in call_kwargs.kwargs
+
+
+# ---------------------------------------------------------------------------
+# Modify Mode
+# ---------------------------------------------------------------------------
+
+class TestModifyMode:
+    def _make_modify_orch(self, project_dir: Path) -> HarnessOrchestrator:
+        config = HarnessConfig(
+            project_dir=str(project_dir), mode="modify", save_artifacts=False,
+        )
+        with (
+            patch("harness.agents.orchestrator.PlannerAgent") as mock_planner_cls,
+            patch("harness.agents.orchestrator.GeneratorAgent"),
+            patch("harness.agents.orchestrator.EvaluatorAgent"),
+            patch("harness.agents.orchestrator.ReviewArtifactManager"),
+            patch("harness.agents.orchestrator.ContractStore"),
+            patch("harness.agents.orchestrator.CriteriaGenerator"),
+            patch("harness.agents.orchestrator.IntentGenerator"),
+            patch("harness.agents.orchestrator.WorktreeManager"),
+            patch("harness.agents.orchestrator.CheckpointStore"),
+            patch("harness.agents.orchestrator.ModifyContextCollector"),
+            patch("harness.agents.orchestrator.ProjectPolicyManager"),
+        ):
+            mock_planner_cls.return_value = MagicMock()
+            orch = HarnessOrchestrator(config)
+        return orch
+
+    def test_plan_modify_collects_context(self, tmp_path: Path) -> None:
+        orch = self._make_modify_orch(tmp_path)
+
+        from harness.agents.planner import ProductSpec
+        mock_spec = ProductSpec(
+            title="수정 작업",
+            description="기존 코드 수정",
+            features=[],
+            design_language={},
+            tech_stack={},
+            sprints=[{"number": 1, "name": "수정", "features": [], "goal": "수정"}],
+        )
+        orch.planner.run.return_value = mock_spec  # type: ignore[union-attr]
+
+        mock_ctx = ModifyContext(git_branch="feature/test")
+        orch._modify_ctx_collector.collect.return_value = mock_ctx  # type: ignore[union-attr]
+
+        result = orch._plan_modify("기능 추가")
+
+        assert result.title == "수정 작업"
+        orch._modify_ctx_collector.collect.assert_called_once()  # type: ignore[union-attr]
+        call_args = orch.planner.run.call_args  # type: ignore[union-attr]
+        assert "수정 요청" in call_args.args[0]
+        assert "기능 추가" in call_args.args[0]
+
+    def test_modify_mode_sprint_adds_hint(self, tmp_path: Path) -> None:
+        """modify 모드에서 스프린트 구현 시 수정 모드 힌트가 계약에 추가되는지 검증."""
+        config = HarnessConfig(
+            project_dir=str(tmp_path), mode="modify", save_artifacts=False,
+        )
+
+        with (
+            patch("harness.agents.orchestrator.PlannerAgent"),
+            patch("harness.agents.orchestrator.GeneratorAgent") as mock_gen_cls,
+            patch("harness.agents.orchestrator.EvaluatorAgent") as mock_eval_cls,
+            patch("harness.agents.orchestrator.ReviewArtifactManager"),
+            patch("harness.agents.orchestrator.ContractStore"),
+            patch("harness.agents.orchestrator.CriteriaGenerator") as mock_criteria_cls,
+            patch("harness.agents.orchestrator.IntentGenerator") as mock_intent_cls,
+            patch("harness.agents.orchestrator.WorktreeManager"),
+            patch("harness.agents.orchestrator.CheckpointStore"),
+            patch("harness.agents.orchestrator.ModifyContextCollector"),
+            patch("harness.agents.orchestrator.ProjectPolicyManager"),
+        ):
+            from harness.agents.evaluator import EvaluationResult
+
+            mock_gen = MagicMock()
+            mock_gen.run.return_value = "제안"
+            mock_gen.implement_sprint.return_value = "보고서"
+            mock_gen._token_usage = {"input": 0, "output": 0}
+            mock_gen_cls.return_value = mock_gen
+
+            mock_eval = MagicMock()
+            mock_eval.negotiate_contract.return_value = "계약"
+            mock_eval.evaluate_sprint.return_value = EvaluationResult(
+                sprint_number=1, passed=True, overall_score=8.0,
+                criteria_scores=[], bugs_found=[], summary="", detailed_feedback="",
+            )
+            mock_eval_cls.return_value = mock_eval
+
+            mock_criteria = MagicMock()
+            mock_criteria.generate.return_value = []
+            mock_criteria.to_markdown.return_value = ""
+            mock_criteria_cls.return_value = mock_criteria
+
+            mock_intent = MagicMock()
+            mock_intent.generate_from_spec.return_value = MagicMock()
+            mock_intent.to_markdown.return_value = ""
+            mock_intent_cls.return_value = mock_intent
+
+            orch = HarnessOrchestrator(config)
+
+            from harness.agents.planner import ProductSpec
+            from harness.context.checkpoint import SessionState
+            sprint_info = {"number": 1, "name": "수정", "goal": "코드 수정"}
+            orch.spec = ProductSpec(
+                title="T", description="", features=[],
+                design_language={}, tech_stack={}, sprints=[sprint_info],
+            )
+            orch._session = SessionState(run_id="test", user_prompt="test")
+
+            orch._execute_sprint(1, sprint_info)
+
+            # Generator의 implement_sprint에 수정 모드 힌트가 포함되었는지 확인
+            impl_call = mock_gen.implement_sprint.call_args
+            contract_arg = impl_call.args[1]
+            assert "수정 모드" in contract_arg

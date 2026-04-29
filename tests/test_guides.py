@@ -8,6 +8,11 @@ from harness.agents.evaluator import EVALUATOR_SYSTEM_PROMPT, EvaluatorAgent
 from harness.agents.generator import GENERATOR_SYSTEM_PROMPT, GeneratorAgent
 from harness.agents.planner import PLANNER_SYSTEM_PROMPT, PlannerAgent
 from harness.guides import GuideRegistry
+from harness.guides.prompts import (
+    MODIFY_EVALUATOR_SYSTEM_PROMPT,
+    MODIFY_GENERATOR_SYSTEM_PROMPT,
+    MODIFY_PLANNER_SYSTEM_PROMPT,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -74,6 +79,20 @@ class TestGuideRegistry:
         context = registry.build_context(criteria_markdown="## Custom Criteria\n")
 
         assert context.criteria_markdown == "## Custom Criteria\n"
+
+    def test_modify_mode_returns_modify_prompts(self) -> None:
+        registry = GuideRegistry(mode="modify")
+        assert registry.get_system_prompt("planner") == MODIFY_PLANNER_SYSTEM_PROMPT
+        assert registry.get_system_prompt("generator") == MODIFY_GENERATOR_SYSTEM_PROMPT
+        assert registry.get_system_prompt("evaluator") == MODIFY_EVALUATOR_SYSTEM_PROMPT
+
+    def test_modify_mode_agents_use_modify_prompts(self, tmp_path: Path) -> None:
+        planner = PlannerAgent(mode="modify")
+        assert planner.get_system_prompt() == MODIFY_PLANNER_SYSTEM_PROMPT
+        gen = GeneratorAgent(str(tmp_path), mode="modify")
+        assert gen.get_system_prompt() == MODIFY_GENERATOR_SYSTEM_PROMPT
+        evaluator = EvaluatorAgent(str(tmp_path), mode="modify")
+        assert evaluator.get_system_prompt() == MODIFY_EVALUATOR_SYSTEM_PROMPT
 
     def test_guide_context_to_markdown_is_stable(self, tmp_path: Path) -> None:
         project = setup_project(tmp_path)

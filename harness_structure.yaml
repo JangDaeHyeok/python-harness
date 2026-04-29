@@ -90,6 +90,15 @@ rules:
       - harness.review
     description: "컨텍스트 모듈은 agents, sensors, review에 의존해서는 안 된다"
 
+  # ADR-0008: 수정 모드 필수 파일
+  - name: required_modify_mode_files
+    type: required_files
+    files:
+      - docs/adr/0008-modify-mode-and-project-policy.md
+      - harness/context/modify_context.py
+      - harness/context/project_policy.py
+    description: "수정 모드 및 프로젝트 정책 관리 필수 파일이 존재해야 한다"
+
   # 코드 패턴 규칙: print 디버깅 금지
   - name: no_print_debug
     type: forbidden_pattern

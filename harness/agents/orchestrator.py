@@ -21,6 +21,8 @@ from harness.context.checkpoint import (
     SessionState,
     SprintState,
 )
+from harness.context.modify_context import ModifyContextCollector
+from harness.context.project_policy import ProjectPolicyManager
 from harness.contracts.models import SprintContract
 from harness.contracts.store import ContractStore
 from harness.review.artifacts import ReviewArtifactManager
@@ -59,10 +61,8 @@ class HarnessConfig:
     app_url: str = "http://localhost:3000"
     enable_context_reset: bool = True
     save_artifacts: bool = True
-    # worktree 격리 실행: True이면 각 구현 시도를 임시 worktree에서 격리 실행한다.
-    # 구현 중 예외가 발생해도 메인 프로젝트를 오염시키지 않는다.
+    mode: str = "create"
     use_worktree_isolation: bool = False
-    # worktree 격리 시 동기화에서 제외할 추가 디렉터리/파일 패턴
     worktree_sync_excludes: list[str] = field(default_factory=list)
 
 
@@ -84,9 +84,13 @@ class HarnessOrchestrator:
         self.project_dir = Path(config.project_dir)
         self.artifacts_dir = self.project_dir / ".harness" / "artifacts"
 
-        self.planner = PlannerAgent(model=config.model)
-        self.generator = GeneratorAgent(project_dir=config.project_dir, model=config.model)
-        self.evaluator = EvaluatorAgent(project_dir=config.project_dir, model=config.model)
+        self.planner = PlannerAgent(model=config.model, mode=config.mode)
+        self.generator = GeneratorAgent(
+            project_dir=config.project_dir, model=config.model, mode=config.mode,
+        )
+        self.evaluator = EvaluatorAgent(
+            project_dir=config.project_dir, model=config.model, mode=config.mode,
+        )
 
         self.spec: ProductSpec | None = None
         self.sprint_results: list[EvaluationResult] = []
@@ -100,6 +104,8 @@ class HarnessOrchestrator:
         self._worktree_mgr = WorktreeManager(self.project_dir)
         self._checkpoint_store = CheckpointStore(self.project_dir)
         self._session: SessionState | None = None
+        self._modify_ctx_collector = ModifyContextCollector(self.project_dir)
+        self._policy_mgr = ProjectPolicyManager(self.project_dir)
 
     def run(
         self, user_prompt: str, *, resume_run_id: str = ""
@@ -133,10 +139,13 @@ class HarnessOrchestrator:
         # Phase 1: Planning (이미 완료된 경우 건너뛰기)
         if self._session.phase == Phase.INIT.value:
             logger.info("=" * 60)
-            logger.info("Phase 1: Planning")
+            logger.info("Phase 1: Planning (%s mode)", self.config.mode)
             logger.info("=" * 60)
 
-            self.spec = self.planner.plan(user_prompt)
+            if self.config.mode == "modify":
+                self.spec = self._plan_modify(user_prompt)
+            else:
+                self.spec = self.planner.plan(user_prompt)
             self._save_artifact("spec.json", self.spec.__dict__)
             logger.info(
                 "스펙 생성 완료: %s (%d개 기능, %d개 스프린트)",
@@ -192,6 +201,25 @@ class HarnessOrchestrator:
         self._save_artifact("summary.json", summary)
         logger.info("하네스 실행 완료: %s", json.dumps(summary, indent=2))
         return summary
+
+    def _plan_modify(self, user_prompt: str) -> ProductSpec:
+        """modify 모드 전용 계획 수립. 기존 코드베이스 컨텍스트를 수집하여 Planner에 전달한다."""
+        policy = self._policy_mgr.load()
+        modify_ctx = self._modify_ctx_collector.collect(policy=policy)
+        context_md = modify_ctx.to_markdown()
+
+        message = (
+            f"다음 수정 요청을 분석하고 수정 계획을 수립해주세요:\n\n"
+            f"## 수정 요청\n{user_prompt}\n\n"
+            f"{context_md}\n\n"
+            "위 프로젝트 컨텍스트를 참고하여 기존 코드베이스를 수정하는 계획을 세워주세요.\n"
+            "새 프로젝트를 만들지 말고 기존 파일을 수정하거나 필요한 파일만 추가하세요.\n"
+            "변경 범위는 최소화하고, 기존 아키텍처 규칙과 코드 컨벤션을 준수하세요."
+        )
+        result = self.planner.run(message)
+        if not isinstance(result, ProductSpec):
+            raise TypeError(f"ProductSpec 예상, {type(result).__name__} 반환됨")
+        return result
 
     def _load_session(self, resume_run_id: str) -> SessionState | None:
         if resume_run_id == "latest":
@@ -281,10 +309,23 @@ class HarnessOrchestrator:
             if attempt > 1 and self.config.enable_context_reset:
                 self.generator.reset_context()
 
+            # modify 모드 추가 컨텍스트
+            modify_hint = ""
+            if self.config.mode == "modify":
+                modify_hint = (
+                    "\n\n## 주의: 수정 모드\n"
+                    "새 프로젝트를 만들지 말고 기존 파일을 수정하세요.\n"
+                    "기존 아키텍처 규칙과 코드 컨벤션을 준수하세요.\n"
+                )
+
+            effective_contract = contract + modify_hint
+
             # worktree 격리 실행 여부에 따라 구현 방식 분기
             if self.config.use_worktree_isolation:
                 try:
-                    impl_report = self._implement_in_worktree(spec_json, contract, sprint_num)
+                    impl_report = self._implement_in_worktree(
+                        spec_json, effective_contract, sprint_num,
+                    )
                 except Exception as e:
                     logger.error(
                         "  [Sprint %d] worktree 구현 예외 — 메인 프로젝트 변경 없이 다음 시도로 진행: %s",
@@ -292,7 +333,9 @@ class HarnessOrchestrator:
                     )
                     continue
             else:
-                impl_report = self.generator.implement_sprint(spec_json, contract, sprint_num)
+                impl_report = self.generator.implement_sprint(
+                    spec_json, effective_contract, sprint_num,
+                )
 
             self._save_artifact(f"sprint_{sprint_num}_impl_attempt{attempt}.md", impl_report)
 

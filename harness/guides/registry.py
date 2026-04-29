@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from harness.guides.prompts import DEFAULT_SYSTEM_PROMPTS
+from harness.guides.prompts import DEFAULT_SYSTEM_PROMPTS, MODIFY_SYSTEM_PROMPTS
 from harness.review.criteria import ADRLoader, CriteriaGenerator
 
 GuideName = Literal["planner", "generator", "evaluator"]
@@ -62,9 +62,12 @@ class GuideRegistry:
         self,
         project_dir: str | Path = ".",
         system_prompts: dict[str, str] | None = None,
+        *,
+        mode: str = "create",
     ) -> None:
         self.project_dir = Path(project_dir)
-        self._system_prompts = dict(DEFAULT_SYSTEM_PROMPTS)
+        base = MODIFY_SYSTEM_PROMPTS if mode == "modify" else DEFAULT_SYSTEM_PROMPTS
+        self._system_prompts = dict(base)
         if system_prompts:
             self._system_prompts.update(system_prompts)
 

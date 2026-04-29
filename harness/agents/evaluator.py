@@ -95,7 +95,9 @@ DEFAULT_CRITERIA = [
 class EvaluatorAgent(BaseAgent):
     """스프린트 결과물을 평가하는 Evaluator 에이전트."""
 
-    def __init__(self, project_dir: str, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self, project_dir: str, model: str = DEFAULT_MODEL, mode: str = "create",
+    ) -> None:
         config = AgentConfig(
             name="evaluator",
             model=model,
@@ -105,7 +107,7 @@ class EvaluatorAgent(BaseAgent):
         )
         super().__init__(config)
         self.project_dir = Path(project_dir)
-        self.guides = GuideRegistry(self.project_dir)
+        self.guides = GuideRegistry(self.project_dir, mode=mode)
 
     def get_system_prompt(self) -> str:
         return self.guides.get_system_prompt("evaluator")

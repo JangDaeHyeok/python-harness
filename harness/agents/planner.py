@@ -50,7 +50,7 @@ class ProductSpec:
 class PlannerAgent(BaseAgent):
     """제품 스펙을 생성하는 Planner 에이전트."""
 
-    def __init__(self, model: str = "claude-sonnet-4-6") -> None:
+    def __init__(self, model: str = "claude-sonnet-4-6", mode: str = "create") -> None:
         config = AgentConfig(
             name="planner",
             model=model,
@@ -58,7 +58,7 @@ class PlannerAgent(BaseAgent):
             temperature=0.8,
         )
         super().__init__(config)
-        self.guides = GuideRegistry()
+        self.guides = GuideRegistry(mode=mode)
 
     def get_system_prompt(self) -> str:
         return self.guides.get_system_prompt("planner")

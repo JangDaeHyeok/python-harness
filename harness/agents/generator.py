@@ -81,7 +81,9 @@ IGNORED_DIRS = {"node_modules", ".git", "__pycache__", ".next", "dist", "build",
 class GeneratorAgent(BaseAgent):
     """스프린트 단위로 기능을 구현하는 Generator 에이전트."""
 
-    def __init__(self, project_dir: str, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self, project_dir: str, model: str = DEFAULT_MODEL, mode: str = "create",
+    ) -> None:
         config = AgentConfig(
             name="generator",
             model=model,
@@ -91,7 +93,7 @@ class GeneratorAgent(BaseAgent):
         )
         super().__init__(config)
         self.project_dir = Path(project_dir)
-        self.guides = GuideRegistry(self.project_dir)
+        self.guides = GuideRegistry(self.project_dir, mode=mode)
 
     def get_system_prompt(self) -> str:
         return self.guides.get_system_prompt("generator")

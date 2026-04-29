@@ -7,11 +7,17 @@ from harness.context.checkpoint import (
     SessionState,
     SprintState,
 )
+from harness.context.modify_context import ModifyContext, ModifyContextCollector
+from harness.context.project_policy import ProjectPolicy, ProjectPolicyManager
 
 __all__ = [
     "AttemptState",
     "CheckpointStore",
+    "ModifyContext",
+    "ModifyContextCollector",
     "Phase",
+    "ProjectPolicy",
+    "ProjectPolicyManager",
     "SessionState",
     "SprintState",
 ]
