@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from harness.agents.base_agent import AgentConfig, AgentMessage
+from harness.agents.base_agent import AgentConfig, AgentMessage, BaseAgent
 from harness.agents.planner import PlannerAgent, ProductSpec
 
 
@@ -82,3 +83,27 @@ class TestProductSpec:
         spec_json = '```json\n{"title":"T","description":"D","features":[],"design_language":{},"tech_stack":{},"sprints":[]}\n```'
         result = planner.process_response(spec_json)
         assert result.title == "T"
+
+
+class _DummyAgent(BaseAgent):
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def process_response(self, response: str) -> Any:
+        return response
+
+
+class TestBaseAgentTokenUsage:
+    def test_token_usage_returns_copy(self) -> None:
+        agent = _DummyAgent(AgentConfig(name="test"))
+        usage = agent.token_usage
+        usage["input"] = 9999
+        assert agent.token_usage["input"] == 0
+
+    def test_merge_token_usage(self) -> None:
+        a = _DummyAgent(AgentConfig(name="a"))
+        b = _DummyAgent(AgentConfig(name="b"))
+        a._token_usage = {"input": 10, "output": 5}
+        b._token_usage = {"input": 100, "output": 50}
+        a.merge_token_usage(b)
+        assert a.token_usage == {"input": 110, "output": 55}

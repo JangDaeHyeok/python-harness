@@ -8,6 +8,7 @@
         --project-dir ./my-project \
         --model claude-sonnet-4-6 \
         --max-retries 3 \
+        --use-worktree \
         "브라우저에서 동작하는 DAW를 만들어주세요"
 """
 
@@ -15,12 +16,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.agents.orchestrator import HarnessConfig, HarnessOrchestrator
+from harness.tools.api_client import ENDPOINT_ENV_VAR
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -34,17 +37,38 @@ def setup_logging(verbose: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="하네스 엔지니어링 프레임워크 실행")
-    parser.add_argument("prompt", help="프로젝트 설명 (1~4문장)")
+    parser.add_argument("prompt", nargs="?", default="", help="프로젝트 설명 (1~4문장)")
     parser.add_argument("--project-dir", default="./project", help="프로젝트 디렉터리")
     parser.add_argument("--model", default="claude-sonnet-4-6", help="사용할 모델")
+    parser.add_argument(
+        "--api-endpoint",
+        help=f"API 엔드포인트. 미지정 시 {ENDPOINT_ENV_VAR} 환경변수를 사용",
+    )
     parser.add_argument("--max-retries", type=int, default=3, help="스프린트당 최대 재시도")
     parser.add_argument("--max-sprints", type=int, default=15, help="최대 스프린트 수")
     parser.add_argument("--app-url", default="http://localhost:3000", help="앱 URL")
     parser.add_argument("--no-context-reset", action="store_true", help="컨텍스트 리셋 비활성화")
+    parser.add_argument("--run-id", default="", help="재개할 run_id (체크포인트)")
+    parser.add_argument("--resume", action="store_true", help="가장 최근 체크포인트에서 재개")
+    parser.add_argument(
+        "--use-worktree",
+        action="store_true",
+        help="스프린트 구현을 임시 git worktree에서 격리 실행",
+    )
+    parser.add_argument(
+        "--worktree-sync-exclude",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="worktree 구현 결과 동기화에서 제외할 파일/디렉터리명 (반복 지정 가능)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
     args = parser.parse_args()
     setup_logging(args.verbose)
+
+    if args.api_endpoint:
+        os.environ[ENDPOINT_ENV_VAR] = args.api_endpoint
 
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -56,12 +80,23 @@ def main() -> None:
         max_total_sprints=args.max_sprints,
         app_url=args.app_url,
         enable_context_reset=not args.no_context_reset,
+        use_worktree_isolation=args.use_worktree,
+        worktree_sync_excludes=args.worktree_sync_exclude,
     )
 
     orchestrator = HarnessOrchestrator(config)
 
+    resume_run_id = ""
+    if args.resume:
+        resume_run_id = "latest"
+    elif args.run_id:
+        resume_run_id = args.run_id
+
+    if not resume_run_id and not args.prompt:
+        parser.error("prompt가 필요합니다. 중단된 실행을 재개하려면 --resume 또는 --run-id를 사용하세요.")
+
     try:
-        summary = orchestrator.run(args.prompt)
+        summary = orchestrator.run(args.prompt, resume_run_id=resume_run_id)
         print("\n" + "=" * 60)
         print("실행 완료!")
         print(f"  프로젝트: {summary['title']}")

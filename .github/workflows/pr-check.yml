@@ -71,4 +71,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python scripts/pr_review.py
+          HARNESS_API_ENDPOINT: ${{ secrets.HARNESS_API_ENDPOINT }}
+        run: |
+          if [ -z "$HARNESS_API_ENDPOINT" ]; then
+            echo "HARNESS_API_ENDPOINT secret is not configured. Skipping AI review."
+            exit 0
+          fi
+          python scripts/pr_review.py
+
+  pr-body:
+    name: PR Body Generator
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Generate PR Body
+        id: pr_body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/create_pr_body.py \
+            --base main \
+            --output /tmp/pr_body.md
+          echo "body_file=/tmp/pr_body.md" >> "$GITHUB_OUTPUT"
+      - name: Update PR Body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr edit "$PR_NUMBER" \
+            --body-file /tmp/pr_body.md

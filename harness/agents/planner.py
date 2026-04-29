@@ -7,56 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
+from harness.guides import GuideRegistry
+from harness.guides.prompts import PLANNER_SYSTEM_PROMPT
 
-PLANNER_SYSTEM_PROMPT = """당신은 시니어 프로덕트 매니저이자 소프트웨어 아키텍트입니다.
-사용자의 간단한 아이디어를 야심찬 범위의 상세한 제품 스펙으로 확장하는 것이 임무입니다.
-
-## 핵심 원칙
-
-1. **야심적 범위 설정**: 사용자의 기대를 넘어서는 기능을 제안하세요.
-   최소한 10개 이상의 주요 기능을 포함해야 합니다.
-
-2. **제품 컨텍스트 중심**: 기술적 구현 세부사항을 명세하지 마세요.
-   사용자 스토리와 제품 경험에 집중하세요.
-
-3. **AI 기능 통합**: 제품에 자연스럽게 AI 기능을 직조하세요.
-
-4. **비주얼 디자인 랭귀지**: 제품의 시각적 정체성을 정의하세요.
-
-5. **스프린트 분해**: 기능을 논리적 순서의 스프린트로 분해하세요.
-
-## 출력 형식
-
-반드시 아래 JSON 형식으로 출력하세요. 다른 텍스트를 포함하지 마세요.
-
-```json
-{
-  "title": "프로젝트 제목",
-  "description": "프로젝트 설명 (2-3문장)",
-  "features": [
-    {"name": "기능명", "user_story": "사용자 스토리", "priority": 1, "sprint": 1}
-  ],
-  "design_language": {
-    "mood": "전체적인 분위기",
-    "color_palette": {"primary": "", "secondary": "", "accent": "", "background": ""},
-    "typography": "타이포그래피 스타일",
-    "layout_principles": ["원칙1", "원칙2"]
-  },
-  "tech_stack": {
-    "frontend": "추천 프레임워크",
-    "backend": "추천 프레임워크",
-    "database": "추천 DB"
-  },
-  "sprints": [
-    {"number": 1, "name": "스프린트명", "features": ["기능1"], "goal": "스프린트 목표"}
-  ],
-  "ai_features": [
-    {"name": "AI 기능명", "description": "설명", "integration_point": "통합 지점"}
-  ],
-  "success_criteria": ["기준1", "기준2"]
-}
-```
-"""
+__all__ = ["PLANNER_SYSTEM_PROMPT", "PlannerAgent", "ProductSpec"]
 
 
 @dataclass
@@ -74,6 +28,10 @@ class ProductSpec:
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def from_json(cls, text: str) -> ProductSpec:
+        return cls.from_dict(json.loads(text))
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProductSpec:
@@ -100,9 +58,10 @@ class PlannerAgent(BaseAgent):
             temperature=0.8,
         )
         super().__init__(config)
+        self.guides = GuideRegistry()
 
     def get_system_prompt(self) -> str:
-        return PLANNER_SYSTEM_PROMPT
+        return self.guides.get_system_prompt("planner")
 
     def process_response(self, response: str) -> ProductSpec:
         cleaned = response.strip()
@@ -124,4 +83,7 @@ class PlannerAgent(BaseAgent):
             "야심적이되 실현 가능한 범위로, 최소 10개 이상의 주요 기능을 포함해주세요.\n"
             "AI 기능을 자연스럽게 통합할 수 있는 기회를 찾아주세요."
         )
-        return self.run(message)
+        result = self.run(message)
+        if not isinstance(result, ProductSpec):
+            raise TypeError(f"ProductSpec 예상, {type(result).__name__} 반환됨")
+        return result

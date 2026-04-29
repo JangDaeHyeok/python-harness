@@ -94,6 +94,25 @@ class CodeReviewer:
             )
         return self._review(diff)
 
+    def review_diff_with_criteria(
+        self, criteria_md: str, base_branch: str = "main"
+    ) -> ReviewResult:
+        """평가 기준을 포함하여 현재 브랜치의 diff를 리뷰한다.
+
+        Args:
+            criteria_md: CriteriaGenerator.to_markdown() 출력 문자열
+            base_branch: 비교 기준 브랜치
+        """
+        diff = self._get_diff(base_branch)
+        if not diff.strip():
+            return ReviewResult(
+                approved=True,
+                overall_assessment="변경사항이 없습니다.",
+                comments=[],
+                summary_for_llm="변경사항 없음.",
+            )
+        return self._review(diff, extra_context=criteria_md)
+
     def review_staged(self) -> ReviewResult:
         """staged 변경사항을 리뷰한다."""
         diff = self._get_staged_diff()
@@ -106,16 +125,20 @@ class CodeReviewer:
             )
         return self._review(diff)
 
-    def _review(self, diff: str) -> ReviewResult:
+    def _review(self, diff: str, extra_context: str = "") -> ReviewResult:
         if len(diff) > 50000:
             diff = diff[:50000] + "\n\n... [diff 잘림: 50000자 초과]"
+
+        user_content = f"다음 diff를 리뷰해주세요:\n\n```diff\n{diff}\n```"
+        if extra_context:
+            user_content = f"## 프로젝트 평가 기준\n\n{extra_context}\n\n---\n\n{user_content}"
 
         response = self.client.create_message(
             model=self.model,
             max_tokens=8000,
             temperature=0.2,
             system=REVIEW_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": f"다음 diff를 리뷰해주세요:\n\n```diff\n{diff}\n```"}],
+            messages=[{"role": "user", "content": user_content}],
         )
 
         text = ""
@@ -162,14 +185,40 @@ class CodeReviewer:
 
     def _get_diff(self, base_branch: str) -> str:
         try:
+            ref = self._resolve_base_ref(base_branch)
             result = subprocess.run(
-                ["git", "diff", f"{base_branch}...HEAD"],
+                ["git", "diff", f"{ref}...HEAD"],
                 cwd=str(self.project_dir),
                 capture_output=True, text=True, timeout=30,
             )
-            return result.stdout
-        except Exception:
-            return ""
+        except Exception as e:
+            raise RuntimeError(f"git diff 실행 실패: {e}") from e
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git diff 실패 (exit {result.returncode}): {result.stderr.strip()}"
+            )
+        return result.stdout
+
+    def _resolve_base_ref(self, base_branch: str) -> str:
+        """로컬 브랜치가 없으면 origin/{base_branch}로 폴백한다."""
+        check = subprocess.run(
+            ["git", "rev-parse", "--verify", base_branch],
+            cwd=str(self.project_dir),
+            capture_output=True, text=True, timeout=10,
+        )
+        if check.returncode == 0:
+            return base_branch
+
+        remote_ref = f"origin/{base_branch}"
+        check_remote = subprocess.run(
+            ["git", "rev-parse", "--verify", remote_ref],
+            cwd=str(self.project_dir),
+            capture_output=True, text=True, timeout=10,
+        )
+        if check_remote.returncode == 0:
+            return remote_ref
+
+        return base_branch
 
     def _get_staged_diff(self) -> str:
         try:
@@ -178,9 +227,13 @@ class CodeReviewer:
                 cwd=str(self.project_dir),
                 capture_output=True, text=True, timeout=30,
             )
-            return result.stdout
-        except Exception:
-            return ""
+        except Exception as e:
+            raise RuntimeError(f"git diff --cached 실행 실패: {e}") from e
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git diff --cached 실패 (exit {result.returncode}): {result.stderr.strip()}"
+            )
+        return result.stdout
 
     def format_as_pr_comments(self, result: ReviewResult) -> list[dict[str, Any]]:
         """리뷰 결과를 GitHub PR 코멘트 형식으로 변환한다."""

@@ -19,6 +19,77 @@ rules:
       - docs/adr/0001-three-agent-architecture.md
     description: "프로젝트 필수 파일이 존재해야 한다"
 
+  # ADR-0004: 리뷰 산출물 필수 파일
+  - name: required_review_files
+    type: required_files
+    files:
+      - docs/code-convention.yaml
+      - docs/adr/0004-review-artifacts-workflow.md
+    description: "리뷰 워크플로 필수 파일이 존재해야 한다"
+
+  # ADR-0004: 리뷰 패키지 의존성 방향
+  - name: review_dependency_direction
+    type: dependency_direction
+    source: harness/review
+    forbidden_imports:
+      - harness.agents
+    description: "리뷰 패키지는 에이전트에 의존해서는 안 된다"
+
+  # ADR-0005: 구조화 스프린트 계약 필수 파일
+  - name: required_contract_files
+    type: required_files
+    files:
+      - docs/adr/0005-structured-sprint-contracts.md
+      - harness/contracts/models.py
+      - harness/contracts/store.py
+    description: "구조화 스프린트 계약 필수 파일이 존재해야 한다"
+
+  # ADR-0005: 계약 모듈 의존성 방향
+  - name: contracts_dependency_direction
+    type: dependency_direction
+    source: harness/contracts
+    forbidden_imports:
+      - harness.agents
+      - harness.sensors
+      - harness.review
+    description: "계약 모듈은 agents, sensors, review에 의존해서는 안 된다"
+
+  # ADR-0006: 체크포인트 필수 파일
+  - name: required_checkpoint_files
+    type: required_files
+    files:
+      - docs/adr/0006-checkpoint-and-resume.md
+      - harness/context/checkpoint.py
+    description: "체크포인트 아키텍처 결정과 구현 파일이 존재해야 한다"
+
+  # ADR-0007: GuideRegistry 필수 파일
+  - name: required_guide_files
+    type: required_files
+    files:
+      - docs/adr/0007-guide-registry.md
+      - harness/guides/registry.py
+      - harness/guides/prompts.py
+    description: "GuideRegistry 아키텍처 결정과 구현 파일이 존재해야 한다"
+
+  # ADR-0007: GuideRegistry 의존성 방향
+  - name: guides_dependency_direction
+    type: dependency_direction
+    source: harness/guides
+    forbidden_imports:
+      - harness.agents
+      - harness.sensors
+    description: "GuideRegistry는 에이전트와 센서에 의존해서는 안 된다"
+
+  # ADR-0006: 컨텍스트 모듈 의존성 방향
+  - name: context_dependency_direction
+    type: dependency_direction
+    source: harness/context
+    forbidden_imports:
+      - harness.agents
+      - harness.sensors
+      - harness.review
+    description: "컨텍스트 모듈은 agents, sensors, review에 의존해서는 안 된다"
+
   # 코드 패턴 규칙: print 디버깅 금지
   - name: no_print_debug
     type: forbidden_pattern

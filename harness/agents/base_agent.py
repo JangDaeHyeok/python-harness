@@ -184,6 +184,16 @@ class BaseAgent(ABC):
         logger.info("[%s] 컨텍스트 리셋 완료", self.config.name)
 
     @property
+    def token_usage(self) -> dict[str, int]:
+        """현재까지의 토큰 사용량 (input, output)."""
+        return dict(self._token_usage)
+
+    def merge_token_usage(self, other: BaseAgent) -> None:
+        """다른 에이전트의 토큰 사용량을 누적한다."""
+        self._token_usage["input"] += other._token_usage["input"]
+        self._token_usage["output"] += other._token_usage["output"]
+
+    @property
     def total_cost(self) -> float:
         """현재까지의 예상 비용(USD). 모델별 가격 적용."""
         return get_model_cost(

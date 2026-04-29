@@ -9,10 +9,20 @@ from pathlib import Path
 from typing import Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
+from harness.guides import GuideRegistry
+from harness.guides.prompts import EVALUATOR_SYSTEM_PROMPT
 from harness.tools.api_client import DEFAULT_MODEL
 from harness.tools.shell import run_command_safe, validate_path
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DEFAULT_CRITERIA",
+    "EVALUATOR_SYSTEM_PROMPT",
+    "EvaluationCriteria",
+    "EvaluationResult",
+    "EvaluatorAgent",
+]
 
 
 @dataclass
@@ -74,44 +84,6 @@ EVALUATOR_TOOLS = [
     },
 ]
 
-EVALUATOR_SYSTEM_PROMPT = """당신은 엄격한 시니어 QA 엔지니어이자 코드 리뷰어입니다.
-Generator가 구현한 스프린트 결과물을 평가하는 것이 임무입니다.
-
-## 평가 원칙
-
-**가장 중요한 원칙: 관대하지 마세요.**
-
-## 평가 기준 (각 기준 0-10점)
-
-1. 제품 깊이 (가중치: 0.3, 임계값: 6)
-2. 기능성 (가중치: 0.3, 임계값: 7)
-3. 비주얼 디자인 (가중치: 0.2, 임계값: 5)
-4. 코드 품질 (가중치: 0.2, 임계값: 6)
-
-## 출력 형식
-
-반드시 아래 JSON 형식으로 출력하세요.
-
-```json
-{
-  "sprint_number": 1,
-  "overall_score": 7.2,
-  "passed": true,
-  "criteria": [
-    {"name": "product_depth", "score": 7, "feedback": "..."},
-    {"name": "functionality", "score": 8, "feedback": "..."},
-    {"name": "visual_design", "score": 6, "feedback": "..."},
-    {"name": "code_quality", "score": 7, "feedback": "..."}
-  ],
-  "bugs_found": [
-    {"severity": "high", "description": "...", "location": "파일:라인", "fix_suggestion": "..."}
-  ],
-  "summary": "전체 평가 요약",
-  "detailed_feedback": "Generator에게 전달할 상세 피드백"
-}
-```
-"""
-
 DEFAULT_CRITERIA = [
     EvaluationCriteria("product_depth", "제품 깊이와 스펙 충실도", 0.3, 6.0),
     EvaluationCriteria("functionality", "핵심 기능 작동 여부", 0.3, 7.0),
@@ -133,9 +105,10 @@ class EvaluatorAgent(BaseAgent):
         )
         super().__init__(config)
         self.project_dir = Path(project_dir)
+        self.guides = GuideRegistry(self.project_dir)
 
     def get_system_prompt(self) -> str:
-        return EVALUATOR_SYSTEM_PROMPT
+        return self.guides.get_system_prompt("evaluator")
 
     def process_response(self, response: str) -> EvaluationResult:
         cleaned = response.strip()
@@ -219,12 +192,28 @@ class EvaluatorAgent(BaseAgent):
             return f"Error: {e}"
 
     def evaluate_sprint(
-        self, sprint_number: int, sprint_contract: str, app_url: str = "http://localhost:3000"
+        self,
+        sprint_number: int,
+        sprint_contract: str,
+        app_url: str = "http://localhost:3000",
+        criteria_md: str | None = None,
     ) -> EvaluationResult:
-        """스프린트 결과물을 평가한다."""
+        """스프린트 결과물을 평가한다.
+
+        Args:
+            sprint_number: 스프린트 번호
+            sprint_contract: 스프린트 계약 (검증 기준)
+            app_url: 테스트 대상 앱 URL
+            criteria_md: 추가 평가 기준 마크다운 (CriteriaGenerator 출력)
+        """
+        criteria_section = ""
+        if criteria_md:
+            criteria_section = f"\n### 프로젝트 평가 기준\n{criteria_md}\n"
+
         message = (
             f"## 스프린트 {sprint_number} 평가\n\n"
             f"### 스프린트 계약 (검증 기준)\n{sprint_contract}\n\n"
+            f"{criteria_section}"
             f"### 테스트 대상 앱\n앱이 {app_url}에서 실행 중입니다.\n\n"
             "다음 절차로 평가해주세요:\n"
             "1. `check_url`로 앱 접근 가능한지 확인\n"
@@ -233,7 +222,10 @@ class EvaluatorAgent(BaseAgent):
             "4. `read_file`로 핵심 코드 파일을 읽고 코드 품질 평가\n\n"
             "**기억하세요: 관대하지 마세요.**"
         )
-        return self.run(message)
+        result = self.run(message)
+        if not isinstance(result, EvaluationResult):
+            raise TypeError(f"EvaluationResult 예상, {type(result).__name__} 반환됨")
+        return result
 
     def negotiate_contract(
         self, spec_json: str, sprint_number: int, generator_proposal: str

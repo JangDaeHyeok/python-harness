@@ -73,3 +73,6 @@ htmlcov/
 
 # pyenv
 # .python-version
+
+# Harness runtime artifacts
+.harness/

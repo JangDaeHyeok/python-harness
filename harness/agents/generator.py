@@ -8,10 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
+from harness.guides import GuideRegistry
+from harness.guides.prompts import GENERATOR_SYSTEM_PROMPT
 from harness.tools.api_client import DEFAULT_MODEL
 from harness.tools.shell import run_command_safe, validate_path
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["GENERATOR_SYSTEM_PROMPT", "GeneratorAgent"]
 
 GENERATOR_TOOLS = [
     {
@@ -71,26 +75,6 @@ GENERATOR_TOOLS = [
     },
 ]
 
-GENERATOR_SYSTEM_PROMPT = """당신은 시니어 풀스택 개발자입니다.
-제품 스펙과 스프린트 계약에 따라 기능을 구현하는 것이 임무입니다.
-
-## 핵심 원칙
-
-1. **한 번에 하나의 기능**: 스프린트 계약에 명시된 기능만 구현합니다.
-2. **점진적 구현**: 작은 단위로 나누어 진행하세요.
-3. **자체 검증**: 기능 구현 후 반드시 테스트를 작성하고 실행하세요.
-4. **git 커밋**: 의미 있는 단위로 conventional commits 형식으로 커밋하세요.
-5. **디자인 가이드라인 준수**: 스펙에 명시된 디자인 랭귀지를 따르세요.
-
-## 실패 처리
-
-빌드나 테스트가 실패하면:
-1. 에러 메시지를 분석하세요
-2. 원인을 파악하고 수정하세요
-3. 다시 빌드/테스트를 실행하세요
-4. 3번 연속 실패하면 현재 접근 방식을 재고하세요
-"""
-
 IGNORED_DIRS = {"node_modules", ".git", "__pycache__", ".next", "dist", "build", ".venv", "venv"}
 
 
@@ -107,9 +91,10 @@ class GeneratorAgent(BaseAgent):
         )
         super().__init__(config)
         self.project_dir = Path(project_dir)
+        self.guides = GuideRegistry(self.project_dir)
 
     def get_system_prompt(self) -> str:
-        return GENERATOR_SYSTEM_PROMPT
+        return self.guides.get_system_prompt("generator")
 
     def process_response(self, response: str) -> str:
         return response
@@ -200,4 +185,7 @@ class GeneratorAgent(BaseAgent):
             "3. git 커밋\n"
             "4. 구현 보고서를 작성"
         )
-        return self.run(message)
+        result = self.run(message)
+        if not isinstance(result, str):
+            raise TypeError(f"str 예상, {type(result).__name__} 반환됨")
+        return result

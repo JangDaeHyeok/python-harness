@@ -1,9 +1,10 @@
-"""하네스 API 클라이언트. 커스텀 Lambda 엔드포인트와 통신한다."""
+"""하네스 API 클라이언트. 환경변수로 제공된 엔드포인트와 통신한다."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -11,9 +12,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ENDPOINT = (
-    "https://xtc3owc564ibjodra32kdtnmoy0pytcm.lambda-url.us-east-1.on.aws/"
-)
+ENDPOINT_ENV_VAR = "HARNESS_API_ENDPOINT"
+DEFAULT_ENDPOINT = ""
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
 MODEL_PRICING: dict[str, dict[str, float]] = {
@@ -70,10 +70,12 @@ def get_model_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 
 
 class HarnessClient:
-    """커스텀 Lambda 엔드포인트용 API 클라이언트."""
+    """환경변수 기반 커스텀 엔드포인트용 API 클라이언트."""
 
-    def __init__(self, endpoint: str = DEFAULT_ENDPOINT) -> None:
-        self.endpoint = endpoint
+    def __init__(self, endpoint: str | None = None) -> None:
+        if endpoint is None:
+            endpoint = os.environ.get(ENDPOINT_ENV_VAR, DEFAULT_ENDPOINT)
+        self.endpoint = endpoint.strip()
 
     def create_message(
         self,
@@ -87,6 +89,11 @@ class HarnessClient:
         thinking: dict[str, Any] | None = None,
     ) -> APIResponse:
         """메시지를 생성한다."""
+        if not self.endpoint:
+            raise APIError(
+                f"API 엔드포인트가 설정되지 않았습니다. {ENDPOINT_ENV_VAR}를 설정하세요."
+            )
+
         request_body: dict[str, Any] = {
             "system": system,
             "messages": messages,
