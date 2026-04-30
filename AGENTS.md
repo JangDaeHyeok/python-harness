@@ -1,78 +1,90 @@
-# Python Harness Framework
+# Python Harness Framework — Agent Guide
 
-AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크.
+이 문서는 하네스 프레임워크 내에서 동작하는 AI 에이전트(Planner, Generator, Evaluator)가 참조하는 런타임 컨텍스트입니다.
 
-## 기술 스택
-- Python 3.11+
-- Anthropic SDK (Claude API)
-- pytest, ruff, mypy
+## 에이전트 역할
 
-## 아키텍처 규칙
-- CRITICAL: 센서(sensors/)는 에이전트(agents/)에 의존 금지 (단방향)
-- CRITICAL: 모든 아키텍처 결정은 docs/adr/에 기록
-- 모든 public 함수에 타입 힌트 필수
-- 수정 모드(`--mode modify`)는 기존 코드베이스 최소 변경, 기존 패턴 재사용, 프로젝트 정책 준수를 기본 원칙으로 한다
+| 에이전트 | 역할 | 입력 | 출력 |
+|----------|------|------|------|
+| **Planner** | 사용자 프롬프트를 제품 스펙과 스프린트 계획으로 변환 | 사용자 프롬프트, (modify 시) 프로젝트 컨텍스트 | ProductSpec |
+| **Generator** | 스프린트 계약에 따라 코드 생성·수정 | SprintContract, project_dir | 파일 변경 |
+| **Evaluator** | 스프린트 결과가 계약·품질 기준을 만족하는지 평가 | SprintContract, project_dir | EvaluationResult |
 
-## 프로젝트 구조
+## 에이전트 도구
+
+Generator가 사용할 수 있는 도구:
+- `write_file`: 파일 작성
+- `read_file`: 파일 읽기
+- `run_command`: 셸 명령 실행 (validate_command 통과 필수)
+- `git_commit`: Git 커밋
+- `list_files`: 파일 목록 조회
+
+Evaluator가 사용할 수 있는 도구:
+- `run_command`: 셸 명령 실행
+- `read_file`: 파일 읽기
+- `check_url`: URL 접근 확인
+
+## 실행 모드별 동작
+
+### create 모드
+- Planner가 제품 스펙과 스프린트 계획을 처음부터 작성한다.
+- Generator는 빈 디렉터리에 새 프로젝트를 생성한다.
+- Evaluator는 기능 완성도와 품질 기준 충족을 평가한다.
+
+### modify 모드
+- Planner는 기존 코드베이스 컨텍스트(diff, ADR, 컨벤션, 구조 규칙, 정책)를 받는다.
+- Generator는 기존 파일의 최소 변경에 집중하며, 기존 패턴을 재사용한다.
+- Evaluator는 변경 정확성과 기존 기능 보존을 더 강하게 본다.
+
+## 아키텍처 규칙 (에이전트 필수 준수)
+
+1. **센서 독립성**: sensors/는 agents/를 임포트하지 않는다 (ADR-0001)
+2. **검사 순서**: ruff → mypy → 구조 → pytest → AI 리뷰 (ADR-0002)
+3. **ADR 기록**: 아키텍처 결정은 docs/adr/에 기록한다 (ADR-0003)
+4. **타입 힌트**: 모든 public 함수에 타입 힌트 필수
+5. **셸 안전**: 셸 명령은 harness/tools/shell.py 래퍼 사용
+6. **print 금지**: harness/ 내부에서 print() 사용 금지, logging 사용
+7. **파싱 안전**: LLM 응답 파싱 실패 시 안전한 기본값으로 폴백
+8. **최소 변경**: modify 모드에서 불필요한 리팩터링, 추상화 금지
+
+## 코드 컨벤션 위치
+- `docs/code-convention.yaml` — ConventionLoader로 로드
+- `harness_structure.yaml` — StructureAnalyzer로 검증
+
+## 산출물 경로
+
+에이전트 실행 중 생성되는 산출물:
+
 ```
-harness/
-├── agents/        # 3-에이전트: Planner, Generator, Evaluator, Orchestrator
-├── sensors/
-│   ├── computational/  # 린터, 테스트, 타입체커, 구조분석
-│   └── inferential/    # AI 코드 리뷰
-├── pipeline/      # 통합 파이프라인
-├── review/        # 리뷰 워크플로: 산출물, 컨벤션, 기준, 설계의도, PR본문, 반영로그, worktree
-├── guides/        # 시스템 프롬프트, 규칙 엔진
-├── context/       # 세션 상태, 체크포인트, modify 컨텍스트, 프로젝트 정책
-├── contracts/     # 스프린트 계약 모델(SprintContract)과 저장소(ContractStore)
-└── tools/         # 파일/셸/Git 도구
+.harness/
+├── artifacts/
+│   ├── spec.json                     # Planner 출력
+│   ├── summary.json                  # 실행 요약
+│   └── sprint_<N>_contract.md        # 스프린트 계약 원문
+├── contracts/
+│   └── sprint_<N>.json               # 구조화 계약 (JSON)
+├── checkpoints/
+│   ├── <run_id>.json                 # 실행별 체크포인트
+│   └── latest.json                   # 최근 실행 포인터
+└── review-artifacts/<branch>/
+    ├── design-intent.md              # 설계 의도
+    ├── code-quality-guide.md         # 평가 기준
+    ├── pr-body.md                    # PR 본문
+    └── review-comments.md            # 리뷰 반영 판단 로그
 ```
 
-## 문서 맵
-- `docs/adr/` — Architecture Decision Records (0001~0008)
-- `docs/code-convention.yaml` — 코드 컨벤션 규칙 (ConventionLoader로 로드)
-- `harness_structure.yaml` — 자동 검증되는 아키텍처 규칙
-- `.harness/review-artifacts/{branch}/` — 브랜치별 리뷰 산출물
-- `.harness/project-policy.yaml` — modify 모드 프로젝트 정책(선택)
+## 품질 기준
 
-## 명령어
-```bash
-pip install -e ".[dev]"           # 개발 의존성 설치
-python scripts/run_harness.py "프롬프트"  # create 모드: 새 프로젝트 생성
-python scripts/run_harness.py --mode modify "수정 요청"  # modify 모드: 현재 코드베이스 수정
-python scripts/run_harness.py --resume  # 현재 디렉터리 체크포인트가 있으면 modify 실행 재개
-python scripts/create_pr_body.py --base main  # PR 본문 생성
-python scripts/create_pr_body.py --base main --output pr-body.md
-ruff check .                      # 린트
-mypy harness                      # 타입 체크
-pytest                            # 테스트
-python scripts/check_structure.py # 구조 분석
-```
+에이전트가 생성한 코드는 다음 기준을 모두 통과해야 한다:
 
-## 리뷰 산출물 경로
-- `.harness/review-artifacts/{branch}/design-intent.md` — 설계 의도
-- `.harness/review-artifacts/{branch}/code-quality-guide.md` — 평가 기준
-- `.harness/review-artifacts/{branch}/pr-body.md` — PR 본문
-- `.harness/review-artifacts/{branch}/review-comments.md` — 리뷰 반영 판단 로그
+- ruff 에러 0개
+- mypy 에러 0개 (strict 모드)
+- pytest 전체 통과
+- harness_structure.yaml 규칙 위반 0개
 
 ## 리뷰 정책
 - 코드 리뷰, PR 리뷰, 리뷰 코멘트 응답은 한국어로 작성한다.
 
-## 계약 저장 경로
-- `.harness/contracts/sprint_{N}.json` — 스프린트별 구조화 계약 (JSON)
-
-## 체크포인트 경로
-- `.harness/checkpoints/{run_id}.json` — 실행별 체크포인트
-- `.harness/checkpoints/latest.json` — 최근 실행 포인터
-- `--project-dir` 없이 `--resume`/`--run-id`를 사용할 때 현재 디렉터리에 체크포인트가 있으면 현재 디렉터리의 modify 실행으로 재개한다
-
-## 수정 모드 컨텍스트
-- 현재 git 브랜치, staged/unstaged diff, 변경 파일 목록을 수집한다
-- 설계 의도, 코드 컨벤션, ADR, 구조 규칙, 최근 ruff/mypy 요약을 Planner에게 전달한다
-- `.harness/project-policy.yaml`이 있으면 컨벤션·ADR·구조 규칙 경로와 프로젝트 정책을 반영한다
-
-## 품질 기준
-- ruff 에러 0개
-- mypy 에러 0개 (strict 모드)
-- pytest 전체 통과
-- 구조 규칙 위반 0개
+## 프로젝트 정책
+- `.harness/project-policy.yaml`이 있으면 컨벤션, ADR, 구조 규칙 경로와 프로젝트별 정책을 반영한다.
+- 정책이 없으면 기본 경로(docs/code-convention.yaml, docs/adr/, harness_structure.yaml)를 사용한다.
