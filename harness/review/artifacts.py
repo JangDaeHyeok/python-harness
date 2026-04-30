@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import logging
-import re
 import subprocess
 from pathlib import Path
 
+from harness.tools.path_safety import DEFAULT_BRANCH_FALLBACK, sanitize_branch_name
+
 logger = logging.getLogger(__name__)
 
-FALLBACK_BRANCH = "unknown-branch"
+FALLBACK_BRANCH = DEFAULT_BRANCH_FALLBACK
 
 
 def get_current_branch(project_dir: Path) -> str:
@@ -28,24 +29,8 @@ def get_current_branch(project_dir: Path) -> str:
         )
         branch = result.stdout.strip()
         return branch if branch else FALLBACK_BRANCH
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return FALLBACK_BRANCH
-
-
-def sanitize_branch_name(name: str) -> str:
-    """브랜치명을 파일 경로에 안전한 형식으로 변환한다.
-
-    - 슬래시(/) → 하이픈(-)
-    - 영숫자·하이픈·점 이외 문자 → 하이픈
-    - 연속 하이픈 축약
-    - 앞뒤 하이픈·점 제거
-    """
-    sanitized = name.replace("/", "-")
-    sanitized = re.sub(r"[^\w\-.]", "-", sanitized)
-    sanitized = sanitized.replace("..", ".")
-    sanitized = re.sub(r"-{2,}", "-", sanitized)
-    sanitized = sanitized.strip("-.")
-    return sanitized or FALLBACK_BRANCH
 
 
 class ReviewArtifactManager:

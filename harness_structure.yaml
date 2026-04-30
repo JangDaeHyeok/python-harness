@@ -102,7 +102,7 @@ rules:
   # 코드 패턴 규칙: print 디버깅 금지
   - name: no_print_debug
     type: forbidden_pattern
-    pattern: "^\\s*print\\("
+    pattern: '^\s*print\('
     directories:
       - harness
     message: "print() 대신 logging을 사용하세요"

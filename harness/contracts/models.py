@@ -12,6 +12,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 
+from harness.tools.json_types import coerce_int
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +61,7 @@ class ContractMetadata:
         return cls(
             created_at=str(data.get("created_at", "")),
             model=str(data.get("model", "")),
-            negotiation_rounds=int(data.get("negotiation_rounds", 1)),
+            negotiation_rounds=coerce_int(data.get("negotiation_rounds"), default=1),
         )
 
 
@@ -112,7 +114,7 @@ class SprintContract:
         features = list(features_raw) if isinstance(features_raw, list) else []
 
         return cls(
-            sprint_number=int(str(data.get("sprint_number", 0))),
+            sprint_number=coerce_int(data.get("sprint_number")),
             raw_text=str(data.get("raw_text", "")),
             features=[str(f) for f in features],
             acceptance_criteria=criteria,

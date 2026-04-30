@@ -75,6 +75,16 @@ class TestProjectPolicyManager:
         loaded = mgr.load()
         assert loaded.project_name == "saved"
         assert loaded.language == "python"
+        assert list(mgr.policy_path.parent.glob(".policy-*.tmp")) == []
+
+    def test_load_non_mapping_uses_default(self, tmp_path: Path) -> None:
+        mgr = ProjectPolicyManager(tmp_path)
+        mgr.policy_path.parent.mkdir(parents=True)
+        mgr.policy_path.write_text("- not\n- mapping\n", encoding="utf-8")
+
+        policy = mgr.load()
+
+        assert policy.review_language == "ko"
 
     def test_init_default_creates_file(self, tmp_path: Path) -> None:
         mgr = ProjectPolicyManager(tmp_path)

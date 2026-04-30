@@ -590,3 +590,57 @@ class TestModifyMode:
             impl_call = mock_gen.implement_sprint.call_args
             contract_arg = impl_call.args[1]
             assert "수정 모드" in contract_arg
+
+    def test_worktree_generator_receives_modify_mode(self, tmp_path: Path) -> None:
+        """--mode modify --use-worktree 조합에서 worktree Generator에 mode가 전달되는지 검증."""
+        from pathlib import Path as _Path
+        from unittest.mock import call
+
+        config = HarnessConfig(
+            project_dir=str(tmp_path), mode="modify",
+            use_worktree_isolation=True, save_artifacts=False,
+        )
+
+        captured: list[dict] = []
+
+        def fake_gen_init(self_inner: object, **kwargs: object) -> None:
+            captured.append(dict(kwargs))
+
+        with (
+            patch("harness.agents.orchestrator.PlannerAgent"),
+            patch("harness.agents.orchestrator.GeneratorAgent"),
+            patch("harness.agents.orchestrator.EvaluatorAgent"),
+            patch("harness.agents.orchestrator.ReviewArtifactManager"),
+            patch("harness.agents.orchestrator.ContractStore"),
+            patch("harness.agents.orchestrator.CriteriaGenerator"),
+            patch("harness.agents.orchestrator.IntentGenerator"),
+            patch("harness.agents.orchestrator.WorktreeManager"),
+            patch("harness.agents.orchestrator.CheckpointStore"),
+            patch("harness.agents.orchestrator.ModifyContextCollector"),
+            patch("harness.agents.orchestrator.ProjectPolicyManager"),
+            patch("harness.agents.orchestrator.is_worktree_dirty", return_value=False),
+            patch("harness.agents.orchestrator.GeneratorAgent") as mock_gen_cls,
+        ):
+            from harness.agents.evaluator import EvaluationResult
+
+            wt_gen = MagicMock()
+            wt_gen.implement_sprint.return_value = "보고서"
+            wt_gen._token_usage = {"input": 0, "output": 0}
+            mock_gen_cls.return_value = wt_gen
+
+            orch = HarnessOrchestrator(config)
+            worktree_path = tmp_path / "wt"
+            worktree_path.mkdir()
+
+            with (
+                patch.object(orch, "_get_head_commit", return_value="abc123"),
+                patch.object(orch._worktree_mgr, "create_worktree", return_value=worktree_path),
+                patch.object(orch, "_sync_from_worktree", return_value=0),
+                patch.object(orch, "_worktree_mgr"),
+            ):
+                orch._worktree_mgr.create_worktree.return_value = worktree_path
+                orch._implement_in_worktree("spec", "contract", 1)
+
+            # worktree 용 GeneratorAgent 생성 시 mode="modify"가 전달되어야 한다
+            init_kwargs = mock_gen_cls.call_args_list[-1]
+            assert init_kwargs.kwargs.get("mode") == "modify"

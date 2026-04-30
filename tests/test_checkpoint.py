@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
+
 from harness.context.checkpoint import (
     AttemptState,
     CheckpointStore,
@@ -121,6 +123,14 @@ class TestSessionState:
         assert s.sprints == []
         assert s.completed_sprint_numbers == []
 
+    def test_from_dict_skips_invalid_completed_sprint_numbers(self) -> None:
+        s = SessionState.from_dict({
+            "run_id": "x",
+            "user_prompt": "y",
+            "completed_sprint_numbers": [1, "2", "bad", True],
+        })
+        assert s.completed_sprint_numbers == [1, 2]
+
 
 # ---------------------------------------------------------------------------
 # CheckpointStore
@@ -186,11 +196,39 @@ class TestCheckpointStore:
         path.write_text("{invalid json", encoding="utf-8")
         assert store.load("bad-run") is None
 
+    @pytest.mark.parametrize("content", ["[]", '"hello"', "42", "true", "null"])
+    def test_non_object_json_returns_none(self, tmp_path: Path, content: str) -> None:
+        store = CheckpointStore(tmp_path)
+        store.base_dir.mkdir(parents=True, exist_ok=True)
+        path = store.base_dir / "non-obj.json"
+        path.write_text(content, encoding="utf-8")
+        assert store.load("non-obj") is None
+
     def test_atomic_write_creates_no_temp_files(self, tmp_path: Path) -> None:
         store = CheckpointStore(tmp_path)
         store.save(SessionState(run_id="clean", user_prompt="test"))
         temp_files = list(store.base_dir.glob(".ckpt-*.tmp"))
         assert temp_files == []
+
+    def test_rejects_unsafe_run_id_chars(self, tmp_path: Path) -> None:
+        store = CheckpointStore(tmp_path)
+        with pytest.raises(ValueError, match="run_id"):
+            store.load("bad.run")
+
+    @pytest.mark.parametrize("content", ["[]", '"bad"', "null"])
+    def test_load_latest_non_object_returns_none(self, tmp_path: Path, content: str) -> None:
+        store = CheckpointStore(tmp_path)
+        store.base_dir.mkdir(parents=True, exist_ok=True)
+        (store.base_dir / "latest.json").write_text(content, encoding="utf-8")
+        assert store.load_latest() is None
+
+    def test_load_latest_unsafe_run_id_returns_none(self, tmp_path: Path) -> None:
+        store = CheckpointStore(tmp_path)
+        store.base_dir.mkdir(parents=True, exist_ok=True)
+        (store.base_dir / "latest.json").write_text(
+            '{"run_id": "bad.run"}', encoding="utf-8"
+        )
+        assert store.load_latest() is None
 
 
 # ---------------------------------------------------------------------------

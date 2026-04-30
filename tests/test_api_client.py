@@ -22,6 +22,15 @@ class TestHarnessClientEndpoint:
 
         assert client.endpoint == "https://explicit.example.test"
 
+    def test_rejects_endpoint_without_http_scheme(self) -> None:
+        with pytest.raises(ValueError, match="http:// 또는 https://"):
+            HarnessClient(endpoint="ftp://example.test/messages")
+
+    @pytest.mark.parametrize("endpoint", ["http://", "https://", "https:///path"])
+    def test_rejects_endpoint_without_host(self, endpoint: str) -> None:
+        with pytest.raises(ValueError, match="호스트"):
+            HarnessClient(endpoint=endpoint)
+
     def test_missing_endpoint_raises_clear_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

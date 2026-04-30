@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from harness.tools.file_io import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 POLICY_FILENAME = "project-policy.yaml"
@@ -115,10 +117,12 @@ class ProjectPolicyManager:
         try:
             content = self._policy_path.read_text(encoding="utf-8")
             data = yaml.safe_load(content) or {}
+            if not isinstance(data, dict):
+                raise ValueError("프로젝트 정책 YAML 최상위 값은 매핑이어야 합니다.")
             self._cached = ProjectPolicy.from_dict(data)
             logger.info("프로젝트 정책 로드 완료: %s", self._policy_path)
             return self._cached
-        except Exception as e:
+        except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             logger.warning("프로젝트 정책 파싱 실패: %s — 기본 정책 사용", e)
             self._cached = ProjectPolicy()
             return self._cached
@@ -127,7 +131,7 @@ class ProjectPolicyManager:
         """정책 파일을 저장한다."""
         self._policy_path.parent.mkdir(parents=True, exist_ok=True)
         content = policy.to_yaml()
-        self._policy_path.write_text(content, encoding="utf-8")
+        atomic_write_text(self._policy_path, content, prefix=".policy-")
         self._cached = policy
         logger.info("프로젝트 정책 저장 완료: %s", self._policy_path)
         return self._policy_path

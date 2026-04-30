@@ -12,22 +12,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from harness.tools.path_safety import sanitize_branch_name
+
 if TYPE_CHECKING:
     from harness.context.project_policy import ProjectPolicy
 
 logger = logging.getLogger(__name__)
 
 _COLLECT_TIMEOUT = 30
+_DIFF_PREVIEW_LIMIT = 5000
+_CONVENTION_PREVIEW_LIMIT = 3000
+_STRUCTURE_PREVIEW_LIMIT = 2000
 
 
-def _sanitize_branch_for_path(name: str) -> str:
-    """브랜치명을 파일 경로에 안전한 형식으로 변환한다 (review 의존 회피용 로컬 구현)."""
-    sanitized = name.replace("/", "-")
-    sanitized = re.sub(r"[^\w\-.]", "-", sanitized)
-    sanitized = sanitized.replace("..", ".")
-    sanitized = re.sub(r"-{2,}", "-", sanitized)
-    sanitized = sanitized.strip("-.")
-    return sanitized or "unknown-branch"
+def _truncate_with_notice(text: str, limit: int) -> str:
+    """텍스트를 제한 길이로 자르고 원본 길이를 표시한다."""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n\n[잘림: 원본 {len(text)}자, 표시 {limit}자]"
 
 
 @dataclass
@@ -58,16 +60,16 @@ class ModifyContext:
 
         if self.git_diff:
             sections.append("## Git Diff\n")
-            diff_preview = self.git_diff[:5000]
-            if len(self.git_diff) > 5000:
-                diff_preview += "\n\n... (이하 생략)"
+            diff_preview = _truncate_with_notice(self.git_diff, _DIFF_PREVIEW_LIMIT)
             sections.append(f"```diff\n{diff_preview}\n```\n")
 
         if self.design_intent:
             sections.append(f"## 설계 의도\n\n{self.design_intent}\n")
 
         if self.code_convention:
-            conv_preview = self.code_convention[:3000]
+            conv_preview = _truncate_with_notice(
+                self.code_convention, _CONVENTION_PREVIEW_LIMIT,
+            )
             sections.append(f"## 코드 컨벤션\n\n```yaml\n{conv_preview}\n```\n")
 
         if self.adrs:
@@ -78,7 +80,9 @@ class ModifyContext:
             sections.append("")
 
         if self.structure_rules:
-            rules_preview = self.structure_rules[:2000]
+            rules_preview = _truncate_with_notice(
+                self.structure_rules, _STRUCTURE_PREVIEW_LIMIT,
+            )
             sections.append(f"## 구조 규칙\n\n```yaml\n{rules_preview}\n```\n")
 
         if self.recent_test_summary:
@@ -194,7 +198,7 @@ class ModifyContextCollector:
         if not artifacts_dir.exists():
             return artifacts_dir / "unknown-branch" / "design-intent.md"
         branch = self._get_git_branch()
-        sanitized = _sanitize_branch_for_path(branch)
+        sanitized = sanitize_branch_name(branch)
         return artifacts_dir / sanitized / "design-intent.md"
 
     def _get_recent_test_summary(self) -> str:
@@ -217,7 +221,8 @@ class ModifyContextCollector:
                 timeout=_COLLECT_TIMEOUT,
             )
             return result.stdout.strip()
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.warning("git 명령 실행 실패 (%s): %s", " ".join(args), e)
             return ""
 
     def _run_cmd(self, *args: str) -> str | None:
@@ -230,7 +235,8 @@ class ModifyContextCollector:
                 timeout=_COLLECT_TIMEOUT,
             )
             return result.stdout.strip() + result.stderr.strip()
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.warning("명령 실행 실패 (%s): %s", " ".join(args), e)
             return None
 
     def _read_file_safe(self, path: Path) -> str:
@@ -238,5 +244,6 @@ class ModifyContextCollector:
             return ""
         try:
             return path.read_text(encoding="utf-8")
-        except Exception:
+        except OSError as e:
+            logger.warning("파일 읽기 실패 (%s): %s", path, e)
             return ""

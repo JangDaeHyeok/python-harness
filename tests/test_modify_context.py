@@ -36,7 +36,12 @@ class TestModifyContext:
     def test_to_markdown_truncates_long_diff(self) -> None:
         ctx = ModifyContext(git_diff="x" * 6000)
         md = ctx.to_markdown()
-        assert "이하 생략" in md
+        assert "[잘림: 원본 6000자, 표시 5000자]" in md
+
+    def test_to_markdown_marks_truncated_code_convention(self) -> None:
+        ctx = ModifyContext(code_convention="x" * 4000)
+        md = ctx.to_markdown()
+        assert "[잘림: 원본 4000자, 표시 3000자]" in md
 
     def test_to_markdown_includes_adrs(self) -> None:
         ctx = ModifyContext(adrs=[{

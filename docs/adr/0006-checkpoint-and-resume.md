@@ -24,7 +24,8 @@ enforced_by:
 2. **CheckpointStore**
    - `.harness/checkpoints/{run_id}.json`에 저장
    - `latest.json` 포인터로 가장 최근 실행 추적
-   - atomic write (tempfile + os.replace)로 파일 손상 방지
+   - `harness/tools/file_io.py`의 atomic write (tempfile + os.replace)로 파일 손상 방지
+   - `run_id`는 영숫자, 하이픈, 언더스코어만 허용하여 체크포인트 경로 조작을 차단
 
 3. **Orchestrator 연동** — 7개 시점에서 체크포인트 저장:
    - planning_done, sprint_start, attempt_start, impl_done, eval_done, sprint_done, run_done

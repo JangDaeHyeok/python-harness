@@ -30,6 +30,7 @@ modify 모드에서는:
    - git branch, git diff, 변경된 파일 목록
    - 설계 의도 문서, 코드 컨벤션, ADR, 구조 규칙
    - 최근 테스트/검증 결과, 프로젝트 정책
+   - Planner에 전달하는 긴 diff/컨벤션/구조 규칙은 길이 제한을 적용하되, 잘린 경우 원본 길이를 명시한다.
 2. 수정 전용 시스템 프롬프트가 에이전트에 적용된다.
 3. Planner는 수정 계획을 ProductSpec 호환 형식으로 생성한다.
 4. Generator는 기존 파일 수정에 집중한다.
@@ -52,6 +53,7 @@ modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 프로젝트별 하네스 동작을 커스터마이즈하는 정책 파일을 도입한다.
 
 - `ProjectPolicyManager`가 정책 파일을 관리한다.
+- 정책 파일 저장은 체크포인트와 같은 atomic write 유틸리티를 사용하여 쓰기 중 실패로 인한 파일 손상을 방지한다.
 - 정책 파일이 없으면 기본값을 사용한다 (하위 호환).
 - `ModifyContextCollector`가 정책 파일을 컨텍스트에 포함한다.
 
@@ -59,6 +61,7 @@ modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 
 - `ModifyContextCollector`: `harness/context/modify_context.py`
 - `ProjectPolicyManager`: `harness/context/project_policy.py`
+- 공통 파일/경로 안전 유틸리티: `harness/tools/file_io.py`, `harness/tools/path_safety.py`
 - 수정 모드 프롬프트: `harness/guides/prompts.py`
 - 모드 분기: `HarnessConfig.mode` 필드, Orchestrator에서 분기
 

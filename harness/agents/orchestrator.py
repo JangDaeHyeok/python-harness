@@ -136,8 +136,10 @@ class HarnessOrchestrator:
             self._session = SessionState(run_id=run_id, user_prompt=user_prompt)
             self._checkpoint_store.save(self._session)
 
+        session = self._require_session()
+
         # Phase 1: Planning (이미 완료된 경우 건너뛰기)
-        if self._session.phase == Phase.INIT.value:
+        if session.phase == Phase.INIT.value:
             logger.info("=" * 60)
             logger.info("Phase 1: Planning (%s mode)", self.config.mode)
             logger.info("=" * 60)
@@ -154,19 +156,21 @@ class HarnessOrchestrator:
                 len(self.spec.sprints),
             )
 
-            self._session.spec_json = self.spec.to_json()
-            self._session.phase = Phase.PLANNING_DONE.value
-            self._checkpoint_store.save(self._session)
+            session.spec_json = self.spec.to_json()
+            session.phase = Phase.PLANNING_DONE.value
+            self._checkpoint_store.save(session)
         else:
-            self.spec = ProductSpec.from_json(self._session.spec_json)
+            self.spec = ProductSpec.from_json(session.spec_json)
             logger.info("저장된 스펙에서 복원: %s", self.spec.title)
 
         # 재개 시 이미 완료된 스프린트 결과를 복원하여 최종 요약에 반영
         if resume_run_id:
             self._restore_completed_sprint_results()
 
+        spec = self._require_spec()
+
         # Phase 2: Sprint Execution
-        for sprint in self.spec.sprints[: self.config.max_total_sprints]:
+        for sprint in spec.sprints[: self.config.max_total_sprints]:
             sprint_num = sprint["number"]
 
             if self._is_sprint_done(sprint_num):
@@ -182,8 +186,8 @@ class HarnessOrchestrator:
                 logger.warning("Sprint %d 최대 재시도 후에도 실패.", sprint_num)
 
         # Phase 3: Summary
-        self._session.phase = Phase.RUN_DONE.value
-        self._checkpoint_store.save(self._session)
+        session.phase = Phase.RUN_DONE.value
+        self._checkpoint_store.save(session)
 
         elapsed = time.time() - self.start_time
         self.total_cost = (
@@ -191,7 +195,7 @@ class HarnessOrchestrator:
         )
 
         summary: dict[str, Any] = {
-            "title": self.spec.title,
+            "title": spec.title,
             "total_sprints": len(self.sprint_results),
             "passed_sprints": sum(1 for r in self.sprint_results if r.passed),
             "total_cost_usd": round(self.total_cost, 2),
@@ -201,6 +205,16 @@ class HarnessOrchestrator:
         self._save_artifact("summary.json", summary)
         logger.info("하네스 실행 완료: %s", json.dumps(summary, indent=2))
         return summary
+
+    def _require_spec(self) -> ProductSpec:
+        if self.spec is None:
+            raise ValueError("spec is required")
+        return self.spec
+
+    def _require_session(self) -> SessionState:
+        if self._session is None:
+            raise ValueError("session is required")
+        return self._session
 
     def _plan_modify(self, user_prompt: str) -> ProductSpec:
         """modify 모드 전용 계획 수립. 기존 코드베이스 컨텍스트를 수집하여 Planner에 전달한다."""
@@ -227,9 +241,8 @@ class HarnessOrchestrator:
         return self._checkpoint_store.load(resume_run_id)
 
     def _execute_sprint(self, sprint_num: int, sprint_info: dict[str, Any]) -> bool:
-        assert self.spec is not None
-        assert self._session is not None
-        spec_json = self.spec.to_json()
+        spec_json = self._require_spec().to_json()
+        session = self._require_session()
 
         # 스프린트 상태 초기화 또는 복원
         sprint_state = self._get_or_create_sprint_state(sprint_num)
@@ -238,8 +251,8 @@ class HarnessOrchestrator:
         if not sprint_state.started:
             # checkpoint: sprint_start
             sprint_state.started = True
-            self._session.phase = Phase.SPRINT_START.value
-            self._checkpoint_store.save(self._session)
+            session.phase = Phase.SPRINT_START.value
+            self._checkpoint_store.save(session)
 
         # 계약 협상 (재개 시 이미 저장된 계약이 있으면 건너뛰기)
         saved_contract = self.contract_store.load(sprint_num)
@@ -303,8 +316,8 @@ class HarnessOrchestrator:
             sprint_state.attempts.append(attempt_state)
 
             # checkpoint: attempt_start
-            self._session.phase = Phase.ATTEMPT_START.value
-            self._checkpoint_store.save(self._session)
+            session.phase = Phase.ATTEMPT_START.value
+            self._checkpoint_store.save(session)
 
             if attempt > 1 and self.config.enable_context_reset:
                 self.generator.reset_context()
@@ -326,7 +339,14 @@ class HarnessOrchestrator:
                     impl_report = self._implement_in_worktree(
                         spec_json, effective_contract, sprint_num,
                     )
-                except Exception as e:
+                except (
+                    WorktreeError,
+                    WorktreeSyncError,
+                    subprocess.SubprocessError,
+                    OSError,
+                    RuntimeError,
+                    TypeError,
+                ) as e:
                     logger.error(
                         "  [Sprint %d] worktree 구현 예외 — 메인 프로젝트 변경 없이 다음 시도로 진행: %s",
                         sprint_num, e,
@@ -341,8 +361,8 @@ class HarnessOrchestrator:
 
             # checkpoint: impl_done
             attempt_state.impl_done = True
-            self._session.phase = Phase.IMPL_DONE.value
-            self._checkpoint_store.save(self._session)
+            session.phase = Phase.IMPL_DONE.value
+            self._checkpoint_store.save(session)
 
             logger.info("  [Sprint %d] 평가 중...", sprint_num)
             eval_result = self.evaluator.evaluate_sprint(
@@ -362,8 +382,8 @@ class HarnessOrchestrator:
             attempt_state.eval_done = True
             attempt_state.passed = eval_result.passed
             attempt_state.score = eval_result.overall_score
-            self._session.phase = Phase.EVAL_DONE.value
-            self._checkpoint_store.save(self._session)
+            session.phase = Phase.EVAL_DONE.value
+            self._checkpoint_store.save(session)
 
             if eval_result.passed:
                 logger.info("  [Sprint %d] 통과! (점수: %s)", sprint_num, eval_result.overall_score)
@@ -372,9 +392,9 @@ class HarnessOrchestrator:
                 # checkpoint: sprint_done (성공)
                 sprint_state.done = True
                 sprint_state.passed = True
-                self._session.completed_sprint_numbers.append(sprint_num)
-                self._session.phase = Phase.SPRINT_DONE.value
-                self._checkpoint_store.save(self._session)
+                session.completed_sprint_numbers.append(sprint_num)
+                session.phase = Phase.SPRINT_DONE.value
+                self._checkpoint_store.save(session)
                 return True
 
             logger.info(
@@ -385,33 +405,43 @@ class HarnessOrchestrator:
 
         if eval_result is not None:
             self.sprint_results.append(eval_result)
+        else:
+            self.sprint_results.append(EvaluationResult(
+                sprint_number=sprint_num,
+                passed=False,
+                overall_score=0.0,
+                criteria_scores=[],
+                bugs_found=[],
+                summary=f"Sprint {sprint_num}: 모든 구현 시도가 예외로 실패",
+                detailed_feedback="",
+            ))
 
         # checkpoint: sprint_done (실패)
         sprint_state.done = True
         sprint_state.passed = False
-        self._session.phase = Phase.SPRINT_DONE.value
-        self._checkpoint_store.save(self._session)
+        session.phase = Phase.SPRINT_DONE.value
+        self._checkpoint_store.save(session)
         return False
 
     def _get_or_create_sprint_state(self, sprint_num: int) -> SprintState:
-        assert self._session is not None
-        for s in self._session.sprints:
+        session = self._require_session()
+        for s in session.sprints:
             if s.sprint_number == sprint_num:
                 return s
         state = SprintState(sprint_number=sprint_num)
-        self._session.sprints.append(state)
+        session.sprints.append(state)
         return state
 
     def _is_sprint_done(self, sprint_num: int) -> bool:
-        assert self._session is not None
-        if sprint_num in self._session.completed_sprint_numbers:
+        session = self._require_session()
+        if sprint_num in session.completed_sprint_numbers:
             return True
-        return any(s.sprint_number == sprint_num and s.done for s in self._session.sprints)
+        return any(s.sprint_number == sprint_num and s.done for s in session.sprints)
 
     def _restore_completed_sprint_results(self) -> None:
         """체크포인트에서 완료된 스프린트의 평가 결과를 sprint_results에 복원한다."""
-        assert self._session is not None
-        for sprint_state in self._session.sprints:
+        session = self._require_session()
+        for sprint_state in session.sprints:
             if not sprint_state.done:
                 continue
             last_attempt = next(
@@ -502,6 +532,7 @@ class HarnessOrchestrator:
             wt_generator = GeneratorAgent(
                 project_dir=str(worktree_path),
                 model=self.config.model,
+                mode=self.config.mode,
             )
             impl_report = wt_generator.implement_sprint(spec_json, contract, sprint_num)
 
@@ -514,7 +545,12 @@ class HarnessOrchestrator:
                 sprint_num, synced,
             )
             return impl_report
-        except Exception:
+        except (
+            WorktreeError,
+            WorktreeSyncError,
+            subprocess.SubprocessError,
+            OSError,
+        ):
             # 예외 발생 시 worktree 변경을 동기화하지 않는다
             logger.warning(
                 "  [Sprint %d] worktree 구현 예외 — 메인 프로젝트 변경 없음.", sprint_num
@@ -586,7 +622,7 @@ class HarnessOrchestrator:
                     if f.strip()
                 ]
             return changes
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             logger.warning("worktree git 명령 실패, 전체 복사로 폴백")
             return None
 

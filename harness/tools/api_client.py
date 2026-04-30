@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,16 @@ class HarnessClient:
         if endpoint is None:
             endpoint = os.environ.get(ENDPOINT_ENV_VAR, DEFAULT_ENDPOINT)
         self.endpoint = endpoint.strip()
+        if self.endpoint:
+            self._validate_endpoint(self.endpoint)
+
+    @staticmethod
+    def _validate_endpoint(endpoint: str) -> None:
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("API 엔드포인트는 http:// 또는 https:// 로 시작해야 합니다.")
+        if not parsed.netloc:
+            raise ValueError("API 엔드포인트에 호스트가 없습니다.")
 
     def create_message(
         self,

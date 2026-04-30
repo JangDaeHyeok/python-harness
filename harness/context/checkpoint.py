@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+
+from harness.tools.file_io import atomic_write_text
+from harness.tools.json_types import coerce_float, coerce_int, coerce_int_list
+from harness.tools.path_safety import validate_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +45,11 @@ class AttemptState:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> AttemptState:
         return cls(
-            attempt=int(str(data.get("attempt", 0))),
+            attempt=coerce_int(data.get("attempt")),
             impl_done=bool(data.get("impl_done", False)),
             eval_done=bool(data.get("eval_done", False)),
             passed=bool(data["passed"]) if data.get("passed") is not None else None,
-            score=float(str(data["score"])) if data.get("score") is not None else None,
+            score=coerce_float(data["score"]) if data.get("score") is not None else None,
         )
 
 
@@ -76,11 +78,11 @@ class SprintState:
             if isinstance(a, dict)
         ]
         return cls(
-            sprint_number=int(str(data.get("sprint_number", 0))),
+            sprint_number=coerce_int(data.get("sprint_number")),
             started=bool(data.get("started", False)),
             done=bool(data.get("done", False)),
             passed=bool(data["passed"]) if data.get("passed") is not None else None,
-            current_attempt=int(str(data.get("current_attempt", 0))),
+            current_attempt=coerce_int(data.get("current_attempt")),
             attempts=attempts,
         )
 
@@ -124,6 +126,8 @@ class SessionState:
     @classmethod
     def from_json(cls, text: str) -> SessionState:
         data = json.loads(text)
+        if not isinstance(data, dict):
+            raise TypeError(f"최상위 JSON 값이 객체가 아닙니다: {type(data).__name__}")
         return cls.from_dict(data)
 
     @classmethod
@@ -134,18 +138,13 @@ class SessionState:
             for s in (raw_sprints if isinstance(raw_sprints, list) else [])
             if isinstance(s, dict)
         ]
-        raw_completed = data.get("completed_sprint_numbers", [])
-        completed = [
-            int(str(n))
-            for n in (raw_completed if isinstance(raw_completed, list) else [])
-        ]
         return cls(
             run_id=str(data.get("run_id", "")),
             user_prompt=str(data.get("user_prompt", "")),
             phase=str(data.get("phase", Phase.INIT.value)),
             spec_json=str(data.get("spec_json", "")),
             sprints=sprints,
-            completed_sprint_numbers=completed,
+            completed_sprint_numbers=coerce_int_list(data.get("completed_sprint_numbers")),
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
         )
@@ -164,8 +163,7 @@ class CheckpointStore:
 
     @staticmethod
     def _validate_run_id(run_id: str) -> None:
-        if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
-            raise ValueError(f"안전하지 않은 run_id입니다: {run_id!r}")
+        validate_run_id(run_id)
 
     @property
     def base_dir(self) -> Path:
@@ -196,7 +194,7 @@ class CheckpointStore:
             return None
         try:
             return SessionState.from_json(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError, ValueError) as e:
             logger.warning("체크포인트 파싱 실패 (%s): %s", run_id, e)
             return None
 
@@ -207,11 +205,13 @@ class CheckpointStore:
             return None
         try:
             data = json.loads(latest_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return None
             run_id = str(data.get("run_id", ""))
             if not run_id:
                 return None
             return self.load(run_id)
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, AttributeError, ValueError):
             return None
 
     def exists(self, run_id: str) -> bool:
@@ -232,19 +232,4 @@ class CheckpointStore:
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(path.parent), suffix=".tmp", prefix=".ckpt-",
-        )
-        closed = False
-        try:
-            os.write(fd, content.encode("utf-8"))
-            os.fsync(fd)
-            os.close(fd)
-            closed = True
-            os.replace(tmp_path, str(path))
-        except BaseException:
-            if not closed:
-                os.close(fd)
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
+        atomic_write_text(path, content, prefix=".ckpt-")
