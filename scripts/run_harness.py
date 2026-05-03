@@ -8,7 +8,7 @@
         --project-dir ./my-project \
         --model claude-sonnet-4-6 \
         --max-retries 3 \
-        --use-worktree \
+        --use-headless-phases \
         "브라우저에서 동작하는 DAW를 만들어주세요"
 """
 
@@ -93,6 +93,22 @@ def main() -> None:
         help="스프린트 구현을 임시 git worktree에서 격리 실행",
     )
     parser.add_argument(
+        "--use-headless-phases",
+        action="store_true",
+        help="스프린트 구현을 Phase별 claude --print 독립 세션으로 실행",
+    )
+    parser.add_argument(
+        "--headless-phase-timeout",
+        type=int,
+        default=600,
+        help="헤드리스 Phase당 타임아웃(초)",
+    )
+    parser.add_argument(
+        "--allow-empty-docs-diff",
+        action="store_true",
+        help="헤드리스 실행에서 docs-update 이후 docs-diff가 비어 있어도 계속 진행",
+    )
+    parser.add_argument(
         "--worktree-sync-exclude",
         action="append",
         default=[],
@@ -126,6 +142,9 @@ def main() -> None:
         mode=mode,
         use_worktree_isolation=args.use_worktree,
         worktree_sync_excludes=args.worktree_sync_exclude,
+        use_headless_phases=args.use_headless_phases,
+        headless_phase_timeout=args.headless_phase_timeout,
+        require_docs_diff_for_headless=not args.allow_empty_docs_diff,
     )
 
     orchestrator = HarnessOrchestrator(config)

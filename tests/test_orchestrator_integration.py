@@ -39,6 +39,9 @@ class TestHarnessConfig:
         assert config.mode == "create"
         assert config.use_worktree_isolation is False
         assert config.worktree_sync_excludes == []
+        assert config.use_headless_phases is False
+        assert config.headless_phase_timeout == 600
+        assert config.require_docs_diff_for_headless is True
 
     def test_worktree_flag(self) -> None:
         config = HarnessConfig(project_dir=".", use_worktree_isolation=True)
@@ -51,6 +54,79 @@ class TestHarnessConfig:
     def test_modify_mode(self) -> None:
         config = HarnessConfig(project_dir=".", mode="modify")
         assert config.mode == "modify"
+
+    def test_headless_phase_flag(self) -> None:
+        config = HarnessConfig(
+            project_dir=".",
+            use_headless_phases=True,
+            headless_phase_timeout=1200,
+            require_docs_diff_for_headless=False,
+        )
+        assert config.use_headless_phases is True
+        assert config.headless_phase_timeout == 1200
+        assert config.require_docs_diff_for_headless is False
+
+
+# ---------------------------------------------------------------------------
+# headless phase implementation
+# ---------------------------------------------------------------------------
+
+class TestHeadlessPhaseImplementation:
+    def _make_orch(self, project_dir: Path) -> HarnessOrchestrator:
+        orch = HarnessOrchestrator.__new__(HarnessOrchestrator)
+        orch.config = HarnessConfig(
+            project_dir=str(project_dir),
+            use_headless_phases=True,
+            headless_phase_timeout=123,
+            require_docs_diff_for_headless=True,
+        )
+        orch.project_dir = project_dir
+        orch._phase_mgr = MagicMock()
+        return orch
+
+    def test_implement_with_headless_phases_returns_report(self, tmp_path: Path) -> None:
+        orch = self._make_orch(tmp_path)
+
+        with patch(
+            "scripts.run_phases.run_sprint_phases",
+            return_value={
+                "phase-01-docs-update": "done",
+                "phase-02-core-impl": "done",
+            },
+        ) as mock_run:
+            report = orch._implement_with_headless_phases(1, attempt=1)
+
+        mock_run.assert_called_once_with(
+            tmp_path,
+            1,
+            timeout=123,
+            require_docs_diff=True,
+        )
+        assert "phase-01-docs-update" in report
+        orch._phase_mgr.reset_incomplete_phases.assert_not_called()
+
+    def test_headless_retry_resets_incomplete_phases(self, tmp_path: Path) -> None:
+        orch = self._make_orch(tmp_path)
+
+        with patch(
+            "scripts.run_phases.run_sprint_phases",
+            return_value={"phase-01-docs-update": "done"},
+        ):
+            orch._implement_with_headless_phases(1, attempt=2)
+
+        orch._phase_mgr.reset_incomplete_phases.assert_called_once_with(1)
+
+    def test_headless_failed_status_raises(self, tmp_path: Path) -> None:
+        orch = self._make_orch(tmp_path)
+
+        with (
+            patch(
+                "scripts.run_phases.run_sprint_phases",
+                return_value={"phase-01-docs-update": "failed"},
+            ),
+            pytest.raises(RuntimeError, match="failed=phase-01-docs-update"),
+        ):
+            orch._implement_with_headless_phases(1, attempt=1)
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +493,8 @@ class TestCriteriaMdConnection:
             # evaluate_sprint 호출 시 criteria_md 인수가 전달됐는지 확인
             call_kwargs = mock_eval.evaluate_sprint.call_args
             assert call_kwargs is not None
-            assert call_kwargs.kwargs.get("criteria_md") == "## 평가 기준\n- 테스트 커버리지"
+            actual_criteria_md = call_kwargs.kwargs.get("criteria_md", "")
+            assert actual_criteria_md.startswith("## 평가 기준\n- 테스트 커버리지")
 
     def test_criteria_md_none_when_generator_returns_empty(self, tmp_path: Path) -> None:
         """CriteriaGenerator가 빈 목록 반환 시 to_markdown 결과가 전달된다."""
@@ -593,9 +670,6 @@ class TestModifyMode:
 
     def test_worktree_generator_receives_modify_mode(self, tmp_path: Path) -> None:
         """--mode modify --use-worktree 조합에서 worktree Generator에 mode가 전달되는지 검증."""
-        from pathlib import Path as _Path
-        from unittest.mock import call
-
         config = HarnessConfig(
             project_dir=str(tmp_path), mode="modify",
             use_worktree_isolation=True, save_artifacts=False,
@@ -621,8 +695,6 @@ class TestModifyMode:
             patch("harness.agents.orchestrator.is_worktree_dirty", return_value=False),
             patch("harness.agents.orchestrator.GeneratorAgent") as mock_gen_cls,
         ):
-            from harness.agents.evaluator import EvaluationResult
-
             wt_gen = MagicMock()
             wt_gen.implement_sprint.return_value = "보고서"
             wt_gen._token_usage = {"input": 0, "output": 0}

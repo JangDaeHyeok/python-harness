@@ -57,6 +57,22 @@ modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 - 정책 파일이 없으면 기본값을 사용한다 (하위 호환).
 - `ModifyContextCollector`가 정책 파일을 컨텍스트에 포함한다.
 
+정책 파일은 다음 필드를 지원한다:
+
+- `project.name`: 프로젝트 표시 이름
+- `project.language`: 주요 언어
+- `project.python_version`: Python 프로젝트의 기준 버전
+- `policies.review_language`: 리뷰와 PR 답글 언어 (기본값 `ko`)
+- `policies.required_checks`: 필수 검사 목록 (기본값 `ruff`, `mypy`, `pytest`, `structure`)
+- `policies.conventions.source`: 코드 컨벤션 파일 경로
+- `policies.adr.directory`: ADR 디렉터리
+- `policies.structure.source`: 구조 규칙 파일 경로
+- `policies.artifacts`: 리뷰 산출물 생성 여부
+- `policies.custom_rules`: 프로젝트별 자유 규칙
+
+정책 파일은 에이전트 판단 기준이지 비밀 저장소가 아니다. 토큰, 비밀값, 개인 계정 정보는 넣지 않는다.
+정책 파싱에 실패하면 경고를 남기고 기본 정책으로 폴백한다.
+
 ### 3. 아키텍처 위치
 
 - `ModifyContextCollector`: `harness/context/modify_context.py`

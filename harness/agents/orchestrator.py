@@ -22,12 +22,16 @@ from harness.context.checkpoint import (
     SprintState,
 )
 from harness.context.modify_context import ModifyContextCollector
+from harness.context.phase_manager import PhaseManager, PhaseStatus
 from harness.context.project_policy import ProjectPolicyManager
 from harness.contracts.models import SprintContract
 from harness.contracts.store import ContractStore
+from harness.guides.context_filter import ContextFilter
 from harness.review.artifacts import ReviewArtifactManager
 from harness.review.criteria import CriteriaGenerator
+from harness.review.docs_diff import DocsDiffGenerator
 from harness.review.intent import IntentGenerator
+from harness.review.session_fork import SessionForkManager
 from harness.review.worktree import WorktreeError, WorktreeManager, is_worktree_dirty
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,9 @@ class HarnessConfig:
     mode: str = "create"
     use_worktree_isolation: bool = False
     worktree_sync_excludes: list[str] = field(default_factory=list)
+    use_headless_phases: bool = False
+    headless_phase_timeout: int = 600
+    require_docs_diff_for_headless: bool = True
 
 
 class HarnessOrchestrator:
@@ -106,6 +113,10 @@ class HarnessOrchestrator:
         self._session: SessionState | None = None
         self._modify_ctx_collector = ModifyContextCollector(self.project_dir)
         self._policy_mgr = ProjectPolicyManager(self.project_dir)
+        self._phase_mgr = PhaseManager(self.project_dir)
+        self._docs_diff_gen = DocsDiffGenerator(self.project_dir)
+        self._context_filter = ContextFilter(self.project_dir)
+        self._session_fork_mgr = SessionForkManager(self.project_dir)
 
     def run(
         self, user_prompt: str, *, resume_run_id: str = ""
@@ -273,27 +284,53 @@ class HarnessOrchestrator:
             structured_contract.metadata.model = self.config.model
             self.contract_store.save(structured_contract)
 
-        # 설계 의도 문서 생성
-        intent = self._intent_gen.generate_from_spec(
-            task_description=str(sprint_info.get("goal", "")),
-            sprint_info=sprint_info,
-            sprint_contract=contract,
+        # 설계 의도 문서 생성 (세션 포크 활용)
+        task_goal = str(sprint_info.get("goal", ""))
+        fork_ctx = self._session_fork_mgr.create_context(
+            user_prompt=self._require_session().user_prompt,
+            sprint_info=json.dumps(sprint_info, ensure_ascii=False),
+            key_decisions=[f"스프린트 {sprint_num} 계약에 따른 구현"],
         )
-        intent_md = self._intent_gen.to_markdown(intent)
-        self.review_artifacts.save(
-            f"design-intent-sprint{sprint_num}.md", intent_md,
-        )
-        self.review_artifacts.save("design-intent.md", intent_md)
+        intent_md = self._session_fork_mgr.generate_intent_from_context(fork_ctx)
+        self.review_artifacts.save(f"design-intent-sprint{sprint_num}.md", intent_md)
         logger.info("  [Sprint %d] 설계 의도 문서 생성 완료", sprint_num)
 
-        # 평가 기준 문서 생성
-        criteria = self._criteria_gen.generate(str(sprint_info.get("goal", "")))
-        criteria_md = self._criteria_gen.to_markdown(criteria)
+        # docs-diff 생성
+        docs_diff = self._docs_diff_gen.generate()
+        docs_diff_md = docs_diff.to_markdown()
+        if docs_diff.has_changes:
+            self.review_artifacts.save(f"docs-diff-sprint{sprint_num}.md", docs_diff_md)
+            logger.info("  [Sprint %d] docs-diff 생성 완료 (%d개 파일)", sprint_num, len(docs_diff.changed_files))
+
+        # 유사 RAG: 컨텍스트 필터링으로 관련 평가 기준만 추출
+        filtered_ctx = self._context_filter.filter(task_goal)
+        filtered_criteria_md = filtered_ctx.to_markdown()
+
+        # 평가 기준 문서 생성 (필터링된 컨텍스트 + 기존 기준 결합)
+        criteria = self._criteria_gen.generate(task_goal)
+        base_criteria_md = self._criteria_gen.to_markdown(criteria)
+        criteria_md = f"{base_criteria_md}\n\n{filtered_criteria_md}"
         self.review_artifacts.save(
             f"code-quality-guide-sprint{sprint_num}.md", criteria_md,
         )
         self.review_artifacts.save("code-quality-guide.md", criteria_md)
         logger.info("  [Sprint %d] 평가 기준 문서 생성 완료 (%d개)", sprint_num, len(criteria))
+
+        # Phase 분할 (Task/Phase 시스템)
+        task_index = self._phase_mgr.create_phases(
+            sprint_number=sprint_num,
+            task_name=str(sprint_info.get("name", f"Sprint {sprint_num}")),
+        )
+        self._phase_mgr.save_task_index(task_index)
+        for phase in task_index.phases:
+            prompt_content = self._phase_mgr.build_phase_prompt(
+                phase=phase,
+                sprint_contract=contract,
+                docs_diff_md=docs_diff_md if docs_diff.has_changes else "",
+                extra_context=filtered_criteria_md,
+            )
+            self._phase_mgr.save_phase_prompt(sprint_num, phase, prompt_content)
+        logger.info("  [Sprint %d] Phase 분할 완료 (%d개)", sprint_num, len(task_index.phases))
 
         # 구현 + 평가 루프 (재개 시 완료된 attempt 건너뛰기)
         resume_from_attempt = sprint_state.current_attempt if resuming_mid_sprint else 0
@@ -333,8 +370,17 @@ class HarnessOrchestrator:
 
             effective_contract = contract + modify_hint
 
-            # worktree 격리 실행 여부에 따라 구현 방식 분기
-            if self.config.use_worktree_isolation:
+            # 구현 방식 분기: 헤드리스 Phase 실행 → worktree 격리 → 기존 Generator
+            if self.config.use_headless_phases:
+                try:
+                    impl_report = self._implement_with_headless_phases(sprint_num, attempt)
+                except RuntimeError as e:
+                    logger.error(
+                        "  [Sprint %d] 헤드리스 Phase 실행 실패 — 다음 시도로 진행: %s",
+                        sprint_num, e,
+                    )
+                    continue
+            elif self.config.use_worktree_isolation:
                 try:
                     impl_report = self._implement_in_worktree(
                         spec_json, effective_contract, sprint_num,
@@ -422,6 +468,42 @@ class HarnessOrchestrator:
         session.phase = Phase.SPRINT_DONE.value
         self._checkpoint_store.save(session)
         return False
+
+    def _implement_with_headless_phases(self, sprint_num: int, attempt: int) -> str:
+        """Phase 파일을 claude --print 독립 세션으로 실행한다."""
+        from scripts.run_phases import PhaseExecutionError, run_sprint_phases
+
+        if attempt > 1:
+            self._phase_mgr.reset_incomplete_phases(sprint_num)
+
+        try:
+            results = run_sprint_phases(
+                self.project_dir,
+                sprint_num,
+                timeout=self.config.headless_phase_timeout,
+                require_docs_diff=self.config.require_docs_diff_for_headless,
+            )
+        except PhaseExecutionError as e:
+            raise RuntimeError(str(e)) from e
+
+        failed = [pid for pid, status in results.items() if status == PhaseStatus.FAILED.value]
+        skipped = [pid for pid, status in results.items() if status == PhaseStatus.SKIPPED.value]
+        if failed or skipped:
+            problems = []
+            if failed:
+                problems.append(f"failed={', '.join(failed)}")
+            if skipped:
+                problems.append(f"skipped={', '.join(skipped)}")
+            raise RuntimeError("; ".join(problems))
+
+        lines = [
+            f"# Sprint {sprint_num} Headless Phase 실행 결과\n",
+            "## Phase 상태\n",
+        ]
+        for phase_id, status in results.items():
+            lines.append(f"- `{phase_id}`: {status}")
+
+        return "\n".join(lines)
 
     def _get_or_create_sprint_state(self, sprint_num: int) -> SprintState:
         session = self._require_session()

@@ -99,6 +99,25 @@ rules:
       - harness/context/project_policy.py
     description: "수정 모드 및 프로젝트 정책 관리 필수 파일이 존재해야 한다"
 
+  # ADR-0009: Phase 실행 및 컨텍스트 격리 필수 파일
+  - name: required_phase_execution_files
+    type: required_files
+    files:
+      - docs/adr/0009-phase-execution-and-context-isolation.md
+      - harness/review/docs_diff.py
+      - harness/context/phase_manager.py
+      - harness/guides/context_filter.py
+      - harness/review/session_fork.py
+    description: "Phase 실행, docs-diff, 컨텍스트 격리 필수 파일이 존재해야 한다"
+
+  # ADR-0009: docs_diff 의존성 방향
+  - name: docs_diff_dependency_direction
+    type: dependency_direction
+    source: harness/review
+    forbidden_imports:
+      - harness.agents
+    description: "리뷰 패키지(docs_diff, session_fork 포함)는 에이전트에 의존해서는 안 된다"
+
   # 코드 패턴 규칙: print 디버깅 금지
   - name: no_print_debug
     type: forbidden_pattern

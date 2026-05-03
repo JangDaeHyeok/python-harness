@@ -49,6 +49,45 @@ def test_main_passes_worktree_options_to_config(tmp_path) -> None:
     mock_orchestrator.run.assert_called_once_with("앱을 만들어줘", resume_run_id="")
 
 
+def test_main_passes_headless_phase_options_to_config(tmp_path) -> None:
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "테스트",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "run_harness.py",
+                "--project-dir",
+                str(project_dir),
+                "--use-headless-phases",
+                "--headless-phase-timeout",
+                "1200",
+                "--allow-empty-docs-diff",
+                "앱을 만들어줘",
+            ],
+        ),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+
+        run_harness.main()
+
+    config = mock_orchestrator_cls.call_args.args[0]
+    assert config.use_headless_phases is True
+    assert config.headless_phase_timeout == 1200
+    assert config.require_docs_diff_for_headless is False
+
+
 def test_main_passes_mode_to_config(tmp_path) -> None:
     project_dir = tmp_path / "project"
     summary = {
