@@ -79,9 +79,13 @@ class GuideRegistry:
         self,
         task_description: str = "",
         criteria_markdown: str | None = None,
+        external_adr_sources: list[str] | None = None,
     ) -> GuideContext:
         """ADR, 코드 컨벤션, 평가 기준 마크다운을 하나의 가이드 컨텍스트로 조립한다."""
         adr_loader = ADRLoader(self.project_dir / "docs" / "adr")
+        all_adrs = adr_loader.load_all()
+        if external_adr_sources:
+            all_adrs.extend(ADRLoader.load_from_external_sources(external_adr_sources))
         adrs = [
             ADRGuide(
                 filename=adr["filename"],
@@ -89,7 +93,7 @@ class GuideRegistry:
                 status=adr["status"],
                 content=adr["content"],
             )
-            for adr in adr_loader.filter_relevant(task_description, adr_loader.load_all())
+            for adr in adr_loader.filter_relevant(task_description, all_adrs)
         ]
 
         criteria_generator = CriteriaGenerator(self.project_dir)

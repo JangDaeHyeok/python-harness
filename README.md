@@ -13,6 +13,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
 - [빠른 시작](#빠른-시작)
 - [운영 시나리오](#운영-시나리오)
 - [사용법](#사용법)
+  - [구현부터 PR 리뷰 반영까지 한 번에 (End-to-End)](#구현부터-pr-리뷰-반영까지-한-번에-end-to-end)
   - [새 프로젝트 생성 (create 모드)](#새-프로젝트-생성-create-모드)
   - [기존 코드베이스 수정 (modify 모드)](#기존-코드베이스-수정-modify-모드)
   - [중단된 실행 재개](#중단된-실행-재개)
@@ -33,6 +34,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
   - [프로젝트별 운영 패턴](#프로젝트별-운영-패턴)
 - [동작 방식](#동작-방식)
   - [create/modify 공통 실행 흐름](#createmodify-공통-실행-흐름)
+  - [End-to-End 흐름 (`--auto-pr`)](#end-to-end-흐름---auto-pr)
   - [헤드리스 Phase 내부 흐름](#헤드리스-phase-내부-흐름)
   - [docs-diff 생성 방식](#docs-diff-생성-방식)
   - [유사 RAG 컨텍스트 필터링](#유사-rag-컨텍스트-필터링)
@@ -107,10 +109,11 @@ pip install -e ".[dev]"
 
 ### 설치 후 CLI 확인
 
-`pip install -e .`로 설치하면 두 개의 CLI 커맨드가 등록됩니다.
+`pip install -e .`로 설치하면 세 개의 CLI 커맨드가 등록됩니다.
 
 ```bash
 harness "프로젝트 설명"           # scripts/run_harness.py의 래퍼
+auto-pr-pipeline --base main     # scripts/auto_pr_pipeline.py의 래퍼
 create-pr-body --base main       # scripts/create_pr_body.py의 래퍼
 ```
 
@@ -153,6 +156,44 @@ python scripts/run_harness.py \
 5. 이후 Phase를 `claude --print` 독립 세션으로 순차 실행합니다.
 6. Evaluator가 계약과 품질 기준으로 결과를 평가합니다.
 
+### 구현부터 PR 리뷰 반영까지 한 번에 (End-to-End)
+
+`--auto-pr` 플래그를 붙이면 구현 성공 후 PR 자동화 파이프라인까지 이어서 실행합니다.
+
+```bash
+python scripts/run_harness.py \
+  --mode modify \
+  --use-headless-phases \
+  --auto-pr --pr-base main \
+  "로그인 실패 시 에러 메시지를 명확히 하고 관련 테스트를 보강해주세요"
+```
+
+이 한 줄이 수행하는 전체 흐름:
+
+```text
+1. 컨텍스트 수집 (diff, ADR, 컨벤션, 구조 규칙)
+2. Planner → 수정 계획 생성
+3. Phase별 구현 (docs-update → core-impl → integration → tests → validation)
+4. Evaluator 평가 (ruff, mypy, pytest, 구조 검사)
+5. ──── 여기까지가 기존 구현 단계 ────
+6. git push → PR 생성
+7. 리뷰 코멘트 수집 (CodeRabbit 등)
+8. ACCEPT/DEFER/IGNORE 분류 → ACCEPT만 자동 반영
+9. 반영 커밋 push → 리뷰 답글
+```
+
+리뷰 반영 후 자동 머지까지 하려면:
+
+```bash
+python scripts/run_harness.py \
+  --mode modify \
+  --use-headless-phases \
+  --auto-pr --pr-base main --pr-auto-merge \
+  "결제 취소 플로우의 테스트를 보강해주세요"
+```
+
+> **참고**: `--auto-pr`은 구현이 성공한 경우(통과한 스프린트가 1개 이상)에만 PR 파이프라인을 실행합니다. 구현이 실패하면 PR을 만들지 않고 구현 결과만 출력합니다.
+
 문서 변경이 필요 없는 아주 작은 수정이라면 명시적으로 예외를 열 수 있습니다.
 
 ```bash
@@ -163,7 +204,7 @@ python scripts/run_harness.py \
   "타이포 하나를 수정해주세요"
 ```
 
-작업 후 PR까지 자동화하려면 현재 브랜치에서 실행합니다.
+PR 파이프라인만 별도로 실행할 수도 있습니다.
 
 ```bash
 python scripts/auto_pr_pipeline.py --base main
@@ -175,7 +216,9 @@ python scripts/auto_pr_pipeline.py --base main
 |------|-----------|------|
 | 새 프로젝트 생성 | `python scripts/run_harness.py "..."` | `./project`에 새 프로젝트 생성 |
 | 기존 코드 수정 | `python scripts/run_harness.py --mode modify "..."` | 기존 Generator 경로로 수정 |
-| 영상식 Phase 실행 | `python scripts/run_harness.py --mode modify --use-headless-phases "..."` | 문서/Phase/독립 세션 중심 운영 |
+| 헤드리스 Phase 실행 | `python scripts/run_harness.py --mode modify --use-headless-phases "..."` | 문서/Phase/독립 세션 중심 운영 |
+| **구현→PR→리뷰 한 번에** | `... --auto-pr --pr-base main "..."` | **구현 성공 시 PR 자동화까지 연결** |
+| 구현→PR→머지 한 번에 | `... --auto-pr --pr-base main --pr-auto-merge "..."` | 리뷰 반영 후 자동 머지까지 |
 | 문서 변경 없는 예외 작업 | `--allow-empty-docs-diff` 추가 | docs-diff 필수 정책을 예외 처리 |
 | Phase 파일만 재실행 | `python scripts/run_phases.py --sprint 1 --require-docs-diff` | 이미 생성된 Phase 인덱스 기준 실행 |
 | PR 생성/리뷰 반영 | `python scripts/auto_pr_pipeline.py --base main` | push, PR, 리뷰 수집, 반영, 답글 |
@@ -255,7 +298,7 @@ python scripts/run_harness.py \
 | 변경된 파일 목록 | `git status` |
 | 설계 의도 | `.harness/review-artifacts/<branch>/design-intent.md` |
 | 코드 컨벤션 | `docs/code-convention.yaml` |
-| ADR 목록 | `docs/adr/` |
+| ADR 목록 | `docs/adr/` + 정책의 `adr.external_sources` |
 | 구조 규칙 | `harness_structure.yaml` |
 | 최근 검증 요약 | `ruff`, `mypy` 실행 결과 |
 | 프로젝트 정책 | `.harness/project-policy.yaml` (선택) |
@@ -538,6 +581,10 @@ python scripts/run_harness.py [OPTIONS] [PROMPT]
 | `--use-headless-phases` | `false` | 스프린트 구현을 Phase별 `claude --print` 독립 세션으로 실행 |
 | `--headless-phase-timeout` | `600` | 헤드리스 Phase당 타임아웃(초) |
 | `--allow-empty-docs-diff` | `false` | 헤드리스 실행에서 docs-update 이후 docs-diff가 비어 있어도 계속 진행 |
+| `--auto-pr` | `false` | 구현 성공 후 PR 자동화 파이프라인(push→PR→리뷰 반영)을 이어서 실행 |
+| `--pr-base` | `main` | PR 대상 브랜치 (`--auto-pr` 사용 시) |
+| `--pr-skip-review` | `false` | PR 생성 후 리뷰 수집/반영 건너뛰기 (`--auto-pr` 사용 시) |
+| `--pr-auto-merge` | `false` | 리뷰 반영 후 PR 자동 머지 (`--auto-pr` 사용 시) |
 | `-v`, `--verbose` | `false` | 상세 로그 출력 |
 
 ### auto_pr_pipeline.py
@@ -593,6 +640,7 @@ python scripts/create_pr_body.py [OPTIONS]
 | `required_checks` | `ruff`, `mypy`, `pytest`, `structure` | 필수 품질 검사 |
 | `conventions.source` | `docs/code-convention.yaml` | 코드 컨벤션 파일 |
 | `adr.directory` | `docs/adr/` | ADR 디렉터리 |
+| `adr.external_sources` | `[]` | 외부 프로젝트 ADR 디렉터리 경로 목록 (절대 경로 또는 `~` 확장 경로) |
 | `structure.source` | `harness_structure.yaml` | 구조 분석 규칙 파일 |
 | `artifacts.design_intent` | `true` | 설계 의도 산출물 생성 여부 |
 | `artifacts.code_quality_guide` | `true` | 평가 기준 산출물 생성 여부 |
@@ -619,6 +667,8 @@ policies:
     source: docs/code-convention.yaml
   adr:
     directory: docs/adr/
+    external_sources:
+      - /path/to/shared-project/docs/adr
   structure:
     source: harness_structure.yaml
   artifacts:
@@ -642,6 +692,7 @@ policies:
 | `policies.required_checks` | 이 프로젝트에서 반드시 통과해야 하는 검사 목록 |
 | `policies.conventions.source` | 컨벤션 YAML 경로 |
 | `policies.adr.directory` | ADR 문서 디렉터리 |
+| `policies.adr.external_sources` | 외부 프로젝트 ADR 디렉터리 절대 경로 목록. 경로가 없거나 디렉터리가 아니면 건너뜀 |
 | `policies.structure.source` | 구조 규칙 YAML 경로 |
 | `policies.artifacts` | 산출물 생성 여부 |
 | `policies.custom_rules` | 프로젝트별 자유 규칙. Planner 컨텍스트에 포함되어 판단 기준으로 사용 |
@@ -662,7 +713,7 @@ run_harness.py --mode modify
 구체적으로는 다음 영향을 줍니다.
 
 - Planner는 정책에 적힌 리뷰 언어, 필수 검사, 문서 경로, custom_rules를 참고해 수정 계획을 세웁니다.
-- ModifyContextCollector는 정책 경로를 기준으로 컨벤션/ADR/구조 규칙을 수집합니다.
+- ModifyContextCollector는 정책 경로를 기준으로 컨벤션/ADR/구조 규칙을 수집합니다. `adr.external_sources`가 있으면 외부 ADR도 함께 로드합니다.
 - Evaluator는 생성된 `code-quality-guide.md`와 필수 검사 기준을 품질 판단에 사용합니다.
 - PR 자동화와 리뷰 답글은 `review_language` 정책과 저장소의 리뷰 정책에 맞춰 한국어를 기본으로 사용합니다.
 
@@ -702,6 +753,7 @@ policies:
 | 백엔드 서비스 | custom_rules에 마이그레이션, API 호환성, 로그 정책 추가 |
 | 레거시 프로젝트 | `required_checks`를 현재 가능한 수준으로 좁히고 점진적으로 강화 |
 | 문서 중심 프로젝트 | artifacts와 docs-diff 정책을 강화 |
+| 공유 ADR 참조 프로젝트 | `adr.external_sources`에 공유 ADR 디렉터리 경로 추가 |
 
 주의사항:
 - 정책 파일은 저장소에 커밋하는 것을 권장합니다.
@@ -725,6 +777,32 @@ policies:
   -> 실패 시 피드백을 반영해 재시도 (최대 max-retries)
   -> 모든 스프린트 결과와 요약 산출
 ```
+
+### End-to-End 흐름 (`--auto-pr`)
+
+`--auto-pr`을 사용하면 구현과 PR 자동화가 하나의 실행으로 이어집니다.
+
+```text
+run_harness.py --auto-pr --pr-base main
+  ┌─ 구현 단계 ──────────────────────────────────────────┐
+  │ 1. 컨텍스트 수집 (diff, ADR, 컨벤션, 구조 규칙)     │
+  │ 2. Planner → 스펙, 스프린트 계획                     │
+  │ 3. Generator/Phase Worker → 구현                     │
+  │ 4. Evaluator → 평가 (실패 시 재시도)                 │
+  └──────────────────────────────────────────────────────┘
+                        │ 통과한 스프린트 ≥ 1
+                        ▼
+  ┌─ PR 자동화 단계 ─────────────────────────────────────┐
+  │ 5. git push -u origin <branch>                       │
+  │ 6. gh pr create (PR 본문 자동 생성)                  │
+  │ 7. 리뷰 코멘트 수집 (CodeRabbit 등)                  │
+  │ 8. ACCEPT/DEFER/IGNORE 분류 → ACCEPT만 반영          │
+  │ 9. 반영 커밋 push → 한국어 답글                      │
+  │10. --pr-auto-merge → gh pr merge                     │
+  └──────────────────────────────────────────────────────┘
+```
+
+구현 단계에서 통과한 스프린트가 0개이면 PR 자동화를 건너뜁니다. PR 자동화가 실패해도 구현 결과는 보존됩니다.
 
 ### 헤드리스 Phase 내부 흐름
 

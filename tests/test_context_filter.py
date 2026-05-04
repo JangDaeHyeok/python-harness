@@ -137,6 +137,24 @@ class TestContextFilter:
         assert result.relevant_adrs == []
         assert result.relevant_conventions == []
 
+    def test_filter_with_external_adr_sources(self, tmp_path: Path) -> None:
+        ext_dir = tmp_path / "external" / "adr"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "0001-ext.md").write_text(
+            "# 외부 에이전트 아키텍처\n\nstatus: accepted\n\n## 결정\n\n"
+            "에이전트 기반 아키텍처 채택.\n",
+            encoding="utf-8",
+        )
+        cf = ContextFilter(tmp_path, external_adr_sources=[str(ext_dir)])
+        result = cf.filter("에이전트 아키텍처")
+        assert len(result.relevant_adrs) >= 1
+        assert any("0001-ext" in adr.get("filename", "") for adr in result.relevant_adrs)
+
+    def test_filter_with_missing_external_source(self, tmp_path: Path) -> None:
+        cf = ContextFilter(tmp_path, external_adr_sources=[str(tmp_path / "nonexistent")])
+        result = cf.filter("에이전트")
+        assert result.relevant_adrs == []
+
     def test_score_adrs_ordering(self) -> None:
         adrs = [
             {"filename": "a.md", "title": "관련 없는 ADR", "content": "무관한 내용", "status": "accepted"},

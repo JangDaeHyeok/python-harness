@@ -49,6 +49,8 @@ python scripts/run_harness.py "프롬프트"  # create 모드: 새 프로젝트 
 python scripts/run_harness.py --mode modify "수정 요청"  # modify 모드: 현재 코드베이스 수정
 python scripts/run_harness.py --mode modify --use-headless-phases "수정 요청"  # Phase별 claude --print 실행
 python scripts/run_harness.py --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
+python scripts/run_harness.py --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"  # 구현→PR→리뷰 반영 End-to-End
+python scripts/run_harness.py --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge "수정 요청"  # 머지까지 한 번에
 python scripts/run_harness.py --resume  # 현재 디렉터리 체크포인트가 있으면 modify 실행 재개
 python scripts/run_harness.py --run-id <run_id>  # 특정 체크포인트에서 재개
 python scripts/create_pr_body.py --base main  # PR 본문 생성
@@ -66,6 +68,7 @@ python scripts/check_structure.py # 구조 분석
 ## CLI 엔트리포인트
 pyproject.toml에 등록된 CLI 커맨드:
 - `harness` → `scripts.run_harness:main`
+- `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`
 
 ## 리뷰 산출물 경로
@@ -99,7 +102,11 @@ pyproject.toml에 등록된 CLI 커맨드:
 - 재시도 시 완료되지 않은 Phase만 pending으로 되돌리고, done Phase는 재실행하지 않는다
 
 ## PR 자동화 운영
-- `scripts/auto_pr_pipeline.py`는 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영 → 답글 → 선택적 머지 순서로 동작한다
+- `run_harness.py --auto-pr`을 사용하면 구현 성공 후 PR 파이프라인을 자동으로 이어서 실행한다
+- `--pr-base`, `--pr-skip-review`, `--pr-auto-merge`로 PR 동작을 제어한다
+- 통과한 스프린트가 0개이면 PR 파이프라인을 건너뛴다
+- PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다
+- `scripts/auto_pr_pipeline.py`는 단독으로도 실행 가능하며, 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영 → 답글 → 선택적 머지 순서로 동작한다
 - 리뷰 코멘트 판정은 `ACCEPT`, `DEFER`, `IGNORE` 중 하나다
 - `ACCEPT` 코멘트만 `claude --print` 리뷰 반영 세션에 전달한다
 - 판정 로그는 `.harness/review-artifacts/{branch}/review-comments.md`에 저장한다
@@ -115,6 +122,9 @@ pyproject.toml에 등록된 CLI 커맨드:
 - 기본 필수 검사는 `ruff`, `mypy`, `pytest`, `structure`이다
 - 기본 문서 경로는 `docs/code-convention.yaml`, `docs/adr/`, `harness_structure.yaml`이다
 - `custom_rules`는 Planner와 Evaluator가 참고하는 프로젝트별 판단 기준이다
+- `adr.external_sources`로 외부 프로젝트의 ADR 디렉터리 경로를 지정할 수 있다
+- 외부 ADR 소스 경로가 존재하지 않거나 디렉터리가 아니면 건너뛴다 (오류 없음)
+- 외부 ADR은 modify 컨텍스트, GuideRegistry, ContextFilter 모두에 반영된다
 - 정책 파일에는 토큰, 비밀값, 개인 계정 정보를 넣지 않는다
 - 정책 변경 후에는 `ruff check`, `mypy harness`, `python3 scripts/check_structure.py`, `pytest`를 실행한다
 
@@ -127,6 +137,7 @@ pyproject.toml에 등록된 CLI 커맨드:
 - 현재 git 브랜치, staged/unstaged diff, 변경 파일 목록을 수집한다
 - 설계 의도, 코드 컨벤션, ADR, 구조 규칙, 최근 ruff/mypy 요약을 Planner에게 전달한다
 - `.harness/project-policy.yaml`이 있으면 컨벤션·ADR·구조 규칙 경로와 프로젝트 정책을 반영한다
+- 정책의 `adr.external_sources`가 있으면 외부 프로젝트 ADR도 함께 로드하여 Planner 컨텍스트에 포함한다
 
 ## 품질 기준
 - ruff 에러 0개

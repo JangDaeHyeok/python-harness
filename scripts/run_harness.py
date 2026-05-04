@@ -10,6 +10,13 @@
         --max-retries 3 \
         --use-headless-phases \
         "브라우저에서 동작하는 DAW를 만들어주세요"
+
+    # 구현 완료 후 PR 자동화까지 한 번에
+    python scripts/run_harness.py \
+        --mode modify \
+        --use-headless-phases \
+        --auto-pr --pr-base main \
+        "로그인 에러 메시지를 개선해주세요"
 """
 
 from __future__ import annotations
@@ -60,6 +67,35 @@ def setup_logging(verbose: bool = False) -> None:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+
+
+def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
+    """구현 성공 후 PR 자동화 파이프라인을 실행한다."""
+    from scripts.auto_pr_pipeline import PipelineError, run_pipeline
+
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 60)
+    logger.info("PR 자동화 파이프라인 시작 (base=%s)", args.pr_base)
+    logger.info("=" * 60)
+
+    try:
+        result = run_pipeline(
+            project_dir,
+            args.pr_base,
+            skip_review=args.pr_skip_review,
+            auto_merge=args.pr_auto_merge,
+        )
+    except PipelineError as e:
+        logger.error("PR 파이프라인 실패: %s", e)
+        return
+
+    print(f"\n  PR: {result.pr_info.url or '생성 실패'}")
+    print(f"  리뷰 코멘트: {len(result.review_comments)}개")
+    print(f"  반영 대상: {len(result.actionable_comments)}개")
+    print(f"  리뷰 반영: {'완료' if result.review_applied else '미반영'}")
+    print(f"  머지: {'완료' if result.merged else '미실행'}")
+    if result.errors:
+        logger.warning("PR 파이프라인 오류: %s", "; ".join(result.errors))
 
 
 def main() -> None:
@@ -115,6 +151,27 @@ def main() -> None:
         metavar="PATH",
         help="worktree 구현 결과 동기화에서 제외할 파일/디렉터리명 (반복 지정 가능)",
     )
+    pr_group = parser.add_argument_group("PR 자동화", "구현 완료 후 PR 파이프라인 연결")
+    pr_group.add_argument(
+        "--auto-pr",
+        action="store_true",
+        help="구현 성공 후 PR 자동화 파이프라인(push→PR→리뷰 반영)을 이어서 실행",
+    )
+    pr_group.add_argument(
+        "--pr-base",
+        default="main",
+        help="PR 대상 브랜치 (--auto-pr 사용 시, 기본값: main)",
+    )
+    pr_group.add_argument(
+        "--pr-skip-review",
+        action="store_true",
+        help="PR 생성 후 리뷰 수집/반영 단계 건너뛰기 (--auto-pr 사용 시)",
+    )
+    pr_group.add_argument(
+        "--pr-auto-merge",
+        action="store_true",
+        help="리뷰 반영 후 PR 자동 머지 (--auto-pr 사용 시)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
     args = parser.parse_args()
@@ -161,6 +218,13 @@ def main() -> None:
         print(f"  비용: ${summary['total_cost_usd']}")
         print(f"  소요 시간: {summary['elapsed_human']}")
         print("=" * 60)
+
+        if args.auto_pr and summary.get("passed_sprints", 0) > 0:
+            _run_auto_pr(project_dir, args)
+        elif args.auto_pr:
+            logging.getLogger(__name__).warning(
+                "통과한 스프린트가 없어 PR 자동화를 건너뜁니다."
+            )
     except KeyboardInterrupt:
         print("\n사용자에 의해 중단됨")
         sys.exit(1)

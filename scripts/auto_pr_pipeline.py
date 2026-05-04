@@ -217,11 +217,13 @@ def _comment_from_api(data: dict[str, object]) -> ReviewComment:
     author = ""
     if isinstance(user, dict):
         author = str(user.get("login", ""))
+    raw_id = data.get("id", 0)
+    raw_line = data.get("line", 0)
     return ReviewComment(
-        comment_id=int(data.get("id", 0) or 0),
+        comment_id=int(raw_id) if isinstance(raw_id, (int, str)) else 0,
         body=str(data.get("body", "")),
         path=str(data.get("path", "")),
-        line=int(data.get("line", 0) or 0),
+        line=int(raw_line) if isinstance(raw_line, (int, str)) else 0,
         author=author,
         url=str(data.get("html_url", "")),
     )

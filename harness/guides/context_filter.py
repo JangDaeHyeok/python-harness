@@ -64,10 +64,15 @@ class FilteredContext:
 class ContextFilter:
     """작업 설명 기반으로 ADR과 컨벤션을 지능적으로 필터링한다."""
 
-    def __init__(self, project_dir: Path) -> None:
+    def __init__(
+        self,
+        project_dir: Path,
+        external_adr_sources: list[str] | None = None,
+    ) -> None:
         self.project_dir = Path(project_dir)
         self._adr_loader = ADRLoader(self.project_dir / "docs" / "adr")
         self._conv_loader = ConventionLoader(self.project_dir)
+        self._external_adr_sources = external_adr_sources or []
 
     def filter(
         self,
@@ -81,6 +86,8 @@ class ContextFilter:
             return FilteredContext(task_description=task_description)
 
         all_adrs = self._adr_loader.load_all()
+        if self._external_adr_sources:
+            all_adrs.extend(ADRLoader.load_from_external_sources(self._external_adr_sources))
         scored_adrs = self._score_adrs(all_adrs, keywords)
         relevant_adrs = [
             adr for adr, score in scored_adrs[:max_adrs] if score > 0

@@ -121,6 +121,58 @@ class TestADRLoader:
         assert "system" in keywords
 
 
+class TestADRLoaderExternalSources:
+    def test_load_from_external_sources_valid_dir(self, tmp_path: Path) -> None:
+        ext_dir = tmp_path / "external" / "adr"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "0001-ext.md").write_text(
+            "# External ADR\nstatus: accepted\n", encoding="utf-8",
+        )
+        adrs = ADRLoader.load_from_external_sources([str(ext_dir)])
+        assert len(adrs) == 1
+        assert adrs[0]["title"] == "External ADR"
+        assert adrs[0]["source"] == str(ext_dir.resolve())
+
+    def test_load_from_external_sources_missing_dir(self, tmp_path: Path) -> None:
+        adrs = ADRLoader.load_from_external_sources([str(tmp_path / "nonexistent")])
+        assert adrs == []
+
+    def test_load_from_external_sources_file_not_dir(self, tmp_path: Path) -> None:
+        f = tmp_path / "not-a-dir.md"
+        f.write_text("text", encoding="utf-8")
+        adrs = ADRLoader.load_from_external_sources([str(f)])
+        assert adrs == []
+
+    def test_load_from_external_sources_empty_list(self) -> None:
+        adrs = ADRLoader.load_from_external_sources([])
+        assert adrs == []
+
+    def test_load_from_external_sources_mixed_valid_invalid(self, tmp_path: Path) -> None:
+        valid_dir = tmp_path / "valid"
+        valid_dir.mkdir()
+        (valid_dir / "0001.md").write_text("# Valid\nstatus: accepted\n", encoding="utf-8")
+
+        adrs = ADRLoader.load_from_external_sources([
+            str(tmp_path / "nonexistent"),
+            str(valid_dir),
+        ])
+        assert len(adrs) == 1
+        assert adrs[0]["title"] == "Valid"
+
+    def test_load_from_external_sources_tilde_expansion(self, tmp_path: Path) -> None:
+        adrs = ADRLoader.load_from_external_sources(["~/nonexistent_adr_dir_xyz"])
+        assert adrs == []
+
+    def test_load_from_dir_skips_unreadable_files(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "adr"
+        adr_dir.mkdir()
+        good = adr_dir / "0001.md"
+        good.write_text("# Good\nstatus: accepted\n", encoding="utf-8")
+        adrs = ADRLoader._load_from_dir(adr_dir, source="test")
+        assert len(adrs) == 1
+        assert adrs[0]["source"] == "test"
+
+
 class TestCriteriaGenerator:
     def test_generate_returns_criteria_list(self, tmp_path: Path) -> None:
         project = setup_project(tmp_path)

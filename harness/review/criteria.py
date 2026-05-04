@@ -35,18 +35,46 @@ class ADRLoader:
 
     def load_all(self) -> list[dict[str, str]]:
         """ADR 디렉터리의 모든 .md 파일을 메타데이터와 함께 반환한다."""
-        if not self.adr_dir.exists():
-            return []
+        return self._load_from_dir(self.adr_dir)
 
+    @staticmethod
+    def _load_from_dir(adr_dir: Path, source: str = "") -> list[dict[str, str]]:
+        """단일 디렉터리에서 ADR을 로드한다."""
+        if not adr_dir.is_dir():
+            return []
         adrs: list[dict[str, str]] = []
-        for path in sorted(self.adr_dir.glob("*.md")):
-            content = path.read_text(encoding="utf-8")
-            adrs.append({
+        for path in sorted(adr_dir.glob("*.md")):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError as e:
+                logger.warning("ADR 파일 읽기 실패 (%s): %s", path, e)
+                continue
+            entry: dict[str, str] = {
                 "filename": path.name,
                 "content": content,
-                "title": self._extract_title(content),
-                "status": self._extract_status(content),
-            })
+                "title": ADRLoader._extract_title(content),
+                "status": ADRLoader._extract_status(content),
+            }
+            if source:
+                entry["source"] = source
+            adrs.append(entry)
+        return adrs
+
+    @staticmethod
+    def load_from_external_sources(sources: list[str]) -> list[dict[str, str]]:
+        """외부 ADR 소스 경로 목록에서 ADR을 로드한다.
+
+        경로가 존재하지 않거나 디렉터리가 아니면 건너뛴다.
+        """
+        adrs: list[dict[str, str]] = []
+        for raw_path in sources:
+            resolved = Path(raw_path).expanduser().resolve()
+            if not resolved.is_dir():
+                logger.info("외부 ADR 소스 건너뜀 (존재하지 않거나 디렉터리가 아님): %s", raw_path)
+                continue
+            loaded = ADRLoader._load_from_dir(resolved, source=str(resolved))
+            logger.info("외부 ADR 소스 로드: %s (%d개)", raw_path, len(loaded))
+            adrs.extend(loaded)
         return adrs
 
     def filter_relevant(

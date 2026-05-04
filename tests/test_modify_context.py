@@ -150,6 +150,63 @@ class TestModifyContextCollector:
         assert ctx.adrs[0]["title"] == "Custom ADR"
         assert ctx.structure_rules == "rules: []"
 
+    def test_collect_with_external_adr_sources(self, tmp_path: Path) -> None:
+        """외부 ADR 소스가 정책에 있으면 내부 ADR과 함께 로드된다."""
+        from harness.context.project_policy import ProjectPolicy
+
+        (tmp_path / "docs" / "adr").mkdir(parents=True)
+        (tmp_path / "docs" / "adr" / "0001.md").write_text(
+            "# Internal ADR\nstatus: accepted\n", encoding="utf-8",
+        )
+
+        ext_dir = tmp_path / "external" / "adr"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "0001-ext.md").write_text(
+            "# External ADR\nstatus: accepted\n", encoding="utf-8",
+        )
+
+        policy = ProjectPolicy(external_adr_sources=[str(ext_dir)])
+        collector = ModifyContextCollector(tmp_path)
+        with (
+            patch.object(collector, "_run_git", return_value="main"),
+            patch.object(collector, "_run_cmd", return_value=None),
+        ):
+            ctx = collector.collect(policy=policy)
+
+        assert len(ctx.adrs) == 2
+        titles = [a["title"] for a in ctx.adrs]
+        assert "Internal ADR" in titles
+        assert "External ADR" in titles
+
+    def test_collect_with_missing_external_adr_source(self, tmp_path: Path) -> None:
+        """외부 ADR 경로가 없으면 무시하고 내부 ADR만 로드한다."""
+        from harness.context.project_policy import ProjectPolicy
+
+        (tmp_path / "docs" / "adr").mkdir(parents=True)
+        (tmp_path / "docs" / "adr" / "0001.md").write_text(
+            "# Internal ADR\nstatus: accepted\n", encoding="utf-8",
+        )
+
+        policy = ProjectPolicy(external_adr_sources=[str(tmp_path / "nonexistent")])
+        collector = ModifyContextCollector(tmp_path)
+        with (
+            patch.object(collector, "_run_git", return_value="main"),
+            patch.object(collector, "_run_cmd", return_value=None),
+        ):
+            ctx = collector.collect(policy=policy)
+
+        assert len(ctx.adrs) == 1
+        assert ctx.adrs[0]["title"] == "Internal ADR"
+
+    def test_to_markdown_shows_external_source_tag(self) -> None:
+        ctx = ModifyContext(adrs=[
+            {"filename": "0001.md", "title": "Local", "status": "accepted"},
+            {"filename": "0001.md", "title": "External", "status": "accepted", "source": "/ext/adr"},
+        ])
+        md = ctx.to_markdown()
+        assert "(외부: /ext/adr)" in md
+        assert md.count("(외부:") == 1
+
     def test_collect_without_policy_uses_defaults(self, tmp_path: Path) -> None:
         """policy=None이면 기본 경로(docs/code-convention.yaml 등)를 사용한다."""
         (tmp_path / "docs" / "code-convention.yaml").parent.mkdir(parents=True)

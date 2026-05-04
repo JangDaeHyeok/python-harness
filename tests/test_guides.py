@@ -94,6 +94,32 @@ class TestGuideRegistry:
         evaluator = EvaluatorAgent(str(tmp_path), mode="modify")
         assert evaluator.get_system_prompt() == MODIFY_EVALUATOR_SYSTEM_PROMPT
 
+    def test_build_context_with_external_adr_sources(self, tmp_path: Path) -> None:
+        project = setup_project(tmp_path)
+        ext_dir = tmp_path / "external" / "adr"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "0010-external.md").write_text(
+            "---\nstatus: accepted\n---\n\n# ADR-0010: External Decision\n\n"
+            "## Context\n외부 프로젝트 결정.\n",
+            encoding="utf-8",
+        )
+        registry = GuideRegistry(project)
+        context = registry.build_context(
+            "External Decision",
+            external_adr_sources=[str(ext_dir)],
+        )
+        filenames = [a.filename for a in context.adrs]
+        assert "0010-external.md" in filenames
+
+    def test_build_context_with_missing_external_source(self, tmp_path: Path) -> None:
+        project = setup_project(tmp_path)
+        registry = GuideRegistry(project)
+        context = registry.build_context(
+            "Guide Registry",
+            external_adr_sources=[str(tmp_path / "nonexistent")],
+        )
+        assert len(context.adrs) >= 1
+
     def test_guide_context_to_markdown_is_stable(self, tmp_path: Path) -> None:
         project = setup_project(tmp_path)
         registry = GuideRegistry(project)

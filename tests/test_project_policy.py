@@ -55,6 +55,25 @@ class TestProjectPolicy:
         assert policy.project_name == ""
         assert policy.review_language == "ko"
         assert len(policy.required_checks) == 4
+        assert policy.external_adr_sources == []
+
+    def test_from_dict_with_external_adr_sources(self) -> None:
+        data = {
+            "policies": {
+                "adr": {
+                    "directory": "docs/adr/",
+                    "external_sources": ["/path/to/other/docs/adr", "~/projects/shared/adr"],
+                },
+            },
+        }
+        policy = ProjectPolicy.from_dict(data)
+        assert policy.external_adr_sources == ["/path/to/other/docs/adr", "~/projects/shared/adr"]
+
+    def test_to_yaml_includes_external_adr_sources(self) -> None:
+        policy = ProjectPolicy(external_adr_sources=["/ext/adr"])
+        yaml_str = policy.to_yaml()
+        assert "/ext/adr" in yaml_str
+        assert "external_sources" in yaml_str
 
 
 class TestProjectPolicyManager:

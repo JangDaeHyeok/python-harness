@@ -40,6 +40,7 @@ class ProjectPolicy:
         "review_comments": True,
         "pr_body": True,
     })
+    external_adr_sources: list[str] = field(default_factory=list)
     custom_rules: dict[str, Any] = field(default_factory=dict)
 
     def to_yaml(self) -> str:
@@ -53,7 +54,7 @@ class ProjectPolicy:
                 "review_language": self.review_language,
                 "required_checks": self.required_checks,
                 "conventions": {"source": self.conventions_source},
-                "adr": {"directory": self.adr_directory},
+                "adr": {"directory": self.adr_directory, "external_sources": self.external_adr_sources},
                 "structure": {"source": self.structure_source},
                 "artifacts": self.artifacts_enabled,
             },
@@ -81,6 +82,7 @@ class ProjectPolicy:
             required_checks=list(policies.get("required_checks", ["ruff", "mypy", "pytest", "structure"])),
             conventions_source=str(conventions.get("source", "docs/code-convention.yaml")),
             adr_directory=str(adr.get("directory", "docs/adr/")),
+            external_adr_sources=list(adr.get("external_sources", [])),
             structure_source=str(structure.get("source", "harness_structure.yaml")),
             artifacts_enabled=dict(policies.get("artifacts", {
                 "design_intent": True,

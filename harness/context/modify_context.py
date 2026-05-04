@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from harness.review.criteria import ADRLoader
 from harness.tools.path_safety import sanitize_branch_name
 
 if TYPE_CHECKING:
@@ -75,7 +76,8 @@ class ModifyContext:
         if self.adrs:
             sections.append("## 아키텍처 결정 (ADR)\n")
             for adr in self.adrs:
-                sections.append(f"### {adr.get('filename', '')}: {adr.get('title', '')}")
+                source_tag = f" (외부: {adr['source']})" if adr.get("source") else ""
+                sections.append(f"### {adr.get('filename', '')}: {adr.get('title', '')}{source_tag}")
                 sections.append(f"상태: {adr.get('status', 'unknown')}\n")
             sections.append("")
 
@@ -122,6 +124,10 @@ class ModifyContextCollector:
             else self.project_dir / "harness_structure.yaml"
         )
 
+        adrs = self._load_adrs(adr_dir)
+        if policy and policy.external_adr_sources:
+            adrs.extend(ADRLoader.load_from_external_sources(policy.external_adr_sources))
+
         ctx = ModifyContext(
             git_branch=self._get_git_branch(),
             git_diff=self._get_git_diff(),
@@ -130,7 +136,7 @@ class ModifyContextCollector:
                 self._find_latest_design_intent()
             ),
             code_convention=self._read_file_safe(convention_path),
-            adrs=self._load_adrs(adr_dir),
+            adrs=adrs,
             structure_rules=self._read_file_safe(structure_path),
             recent_test_summary=self._get_recent_test_summary(),
             project_policy=self._read_file_safe(

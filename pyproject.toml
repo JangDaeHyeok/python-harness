@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 harness = "scripts.run_harness:main"
+auto-pr-pipeline = "scripts.auto_pr_pipeline:main"
 create-pr-body = "scripts.create_pr_body:main"
 
 [tool.ruff]

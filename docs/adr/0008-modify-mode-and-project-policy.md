@@ -66,6 +66,7 @@ modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 - `policies.required_checks`: 필수 검사 목록 (기본값 `ruff`, `mypy`, `pytest`, `structure`)
 - `policies.conventions.source`: 코드 컨벤션 파일 경로
 - `policies.adr.directory`: ADR 디렉터리
+- `policies.adr.external_sources`: 외부 프로젝트 ADR 디렉터리 절대 경로 목록. 경로가 존재하지 않거나 디렉터리가 아니면 건너뛴다
 - `policies.structure.source`: 구조 규칙 파일 경로
 - `policies.artifacts`: 리뷰 산출물 생성 여부
 - `policies.custom_rules`: 프로젝트별 자유 규칙
