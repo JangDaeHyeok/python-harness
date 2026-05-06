@@ -90,19 +90,35 @@ harness/
 
 ## 주요 명령어
 
+`pip install -e .` 후 CLI 단축 명령을 사용할 수 있습니다. 모든 옵션은 `--help`로 확인합니다.
+
 ```bash
 pip install -e ".[dev]"           # 개발 의존성 설치
-python scripts/run_harness.py "프롬프트"  # create 모드
-python scripts/run_harness.py --mode modify "수정 요청"  # modify 모드
-python scripts/run_harness.py --mode modify --use-headless-phases "수정 요청"
-python scripts/run_harness.py --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
-python scripts/run_harness.py --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"
-python scripts/run_harness.py --resume
-python scripts/run_harness.py --run-id <run_id>
-python scripts/create_pr_body.py --base main
+
+# === harness (= python scripts/run_harness.py) ===
+harness --help                                      # 전체 옵션 확인
+harness "프롬프트"                                    # create 모드
+harness --mode modify "수정 요청"                     # modify 모드
+harness --mode modify --use-headless-phases "수정 요청"
+harness --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
+harness --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"
+harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge "수정 요청"
+harness --resume
+harness --run-id <run_id>
+
+# === create-pr-body (= python scripts/create_pr_body.py) ===
+create-pr-body --help
+create-pr-body --base main
+create-pr-body --base main --output pr-body.md
+
+# === auto-pr-pipeline (= python scripts/auto_pr_pipeline.py) ===
+auto-pr-pipeline --help
+auto-pr-pipeline --base main
+auto-pr-pipeline --base main --auto-merge
+
+# === 스크립트 직접 실행 (CLI 단축 명령 없음) ===
 python scripts/run_phases.py --sprint 1
 python scripts/run_phases.py --sprint 1 --require-docs-diff
-python scripts/auto_pr_pipeline.py --base main
 ruff check .
 mypy harness
 pytest
@@ -110,6 +126,7 @@ python scripts/check_structure.py
 ```
 
 ## CLI 엔트리포인트
+`pip install -e .` 후 사용 가능한 CLI 커맨드:
 - `harness` → `scripts.run_harness:main`
 - `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`

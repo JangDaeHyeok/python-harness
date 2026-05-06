@@ -45,20 +45,35 @@ harness/
 ## 명령어
 ```bash
 pip install -e ".[dev]"           # 개발 의존성 설치
-python scripts/run_harness.py "프롬프트"  # create 모드: 새 프로젝트 생성
-python scripts/run_harness.py --mode modify "수정 요청"  # modify 모드: 현재 코드베이스 수정
-python scripts/run_harness.py --mode modify --use-headless-phases "수정 요청"  # Phase별 claude --print 실행
-python scripts/run_harness.py --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
-python scripts/run_harness.py --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"  # 구현→PR→리뷰 반영 End-to-End
-python scripts/run_harness.py --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge "수정 요청"  # 머지까지 한 번에
-python scripts/run_harness.py --resume  # 현재 디렉터리 체크포인트가 있으면 modify 실행 재개
-python scripts/run_harness.py --run-id <run_id>  # 특정 체크포인트에서 재개
-python scripts/create_pr_body.py --base main  # PR 본문 생성
-python scripts/create_pr_body.py --base main --output pr-body.md
-python scripts/run_phases.py --sprint 1  # Phase별 헤드리스 실행
+
+# === harness (= python scripts/run_harness.py) ===
+harness --help                                      # 전체 옵션 확인
+harness "프롬프트"                                    # create 모드: 새 프로젝트 생성
+harness --mode modify "수정 요청"                     # modify 모드: 현재 코드베이스 수정
+harness --mode modify --use-headless-phases "수정 요청"  # Phase별 claude --print 실행
+harness --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
+harness --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"  # 구현→PR→리뷰 반영 End-to-End
+harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge "수정 요청"  # 머지까지 한 번에
+harness --resume                                     # 현재 디렉터리 체크포인트가 있으면 modify 실행 재개
+harness --run-id <run_id>                            # 특정 체크포인트에서 재개
+
+# === create-pr-body (= python scripts/create_pr_body.py) ===
+create-pr-body --help                                # 전체 옵션 확인
+create-pr-body --base main                           # PR 본문 생성 (표준 출력)
+create-pr-body --base main --output pr-body.md       # PR 본문 파일 저장
+create-pr-body --base main --summary "요약" --branch feature/x  # 요약·브랜치 오버라이드
+create-pr-body --base main --use-worktree            # worktree 격리 실행
+
+# === auto-pr-pipeline (= python scripts/auto_pr_pipeline.py) ===
+auto-pr-pipeline --help                              # 전체 옵션 확인
+auto-pr-pipeline --base main                         # PR 자동화 파이프라인
+auto-pr-pipeline --base main --auto-merge            # 리뷰 반영 후 자동 머지
+auto-pr-pipeline --base main --skip-review           # 리뷰 수집/반영 건너뛰기
+auto-pr-pipeline --base main --title "PR 제목" --no-poll  # 제목 지정, 폴링 비활성화
+
+# === 스크립트 직접 실행 (CLI 단축 명령과 동일) ===
+python scripts/run_phases.py --sprint 1              # Phase별 헤드리스 실행
 python scripts/run_phases.py --sprint 1 --require-docs-diff  # docs-update 이후 docs-diff 필수
-python scripts/auto_pr_pipeline.py --base main  # PR 자동화 파이프라인
-python scripts/auto_pr_pipeline.py --base main --auto-merge  # 리뷰 반영 후 자동 머지
 ruff check .                      # 린트
 mypy harness                      # 타입 체크
 pytest                            # 테스트
@@ -66,7 +81,7 @@ python scripts/check_structure.py # 구조 분석
 ```
 
 ## CLI 엔트리포인트
-pyproject.toml에 등록된 CLI 커맨드:
+pyproject.toml에 등록된 CLI 커맨드 (`pip install -e .` 후 사용 가능):
 - `harness` → `scripts.run_harness:main`
 - `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`
