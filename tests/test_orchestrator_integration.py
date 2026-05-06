@@ -6,7 +6,7 @@ API 호출 없이 구조·동작·연결만 검증한다.
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -103,7 +103,7 @@ class TestHeadlessPhaseImplementation:
             require_docs_diff=True,
         )
         assert "phase-01-docs-update" in report
-        orch._phase_mgr.reset_incomplete_phases.assert_not_called()
+        cast("Any", orch._phase_mgr.reset_incomplete_phases).assert_not_called()
 
     def test_headless_retry_resets_incomplete_phases(self, tmp_path: Path) -> None:
         orch = self._make_orch(tmp_path)
@@ -114,7 +114,7 @@ class TestHeadlessPhaseImplementation:
         ):
             orch._implement_with_headless_phases(1, attempt=2)
 
-        orch._phase_mgr.reset_incomplete_phases.assert_called_once_with(1)
+        cast("Any", orch._phase_mgr.reset_incomplete_phases).assert_called_once_with(1)
 
     def test_headless_failed_status_raises(self, tmp_path: Path) -> None:
         orch = self._make_orch(tmp_path)
@@ -353,13 +353,13 @@ class TestImplementInWorktree:
         ):
             orch._implement_in_worktree("spec", "contract", 1)
 
-        orch._worktree_mgr.create_worktree.assert_not_called()  # type: ignore[union-attr]
+        cast("Any", orch._worktree_mgr.create_worktree).assert_not_called()
 
     def test_no_fallback_when_worktree_fails(self, tmp_path: Path) -> None:
         orch = self._make_orch(tmp_path)
 
-        orch._worktree_mgr.create_worktree.side_effect = RuntimeError("worktree failed")  # type: ignore[union-attr]
-        orch.generator.implement_sprint.return_value = "구현 보고서"  # type: ignore[union-attr]
+        cast("Any", orch._worktree_mgr.create_worktree).side_effect = RuntimeError("worktree failed")
+        cast("Any", orch.generator.implement_sprint).return_value = "구현 보고서"
 
         with (
             patch("harness.agents.orchestrator.is_worktree_dirty", return_value=False),
@@ -367,14 +367,14 @@ class TestImplementInWorktree:
         ):
             orch._implement_in_worktree("spec", "contract", 1)
 
-        orch.generator.implement_sprint.assert_not_called()  # type: ignore[union-attr]
+        cast("Any", orch.generator.implement_sprint).assert_not_called()
 
     def test_uses_worktree_generator_when_available(self, tmp_path: Path) -> None:
         orch = self._make_orch(tmp_path)
 
         worktree_path = tmp_path / "wt"
         worktree_path.mkdir()
-        orch._worktree_mgr.create_worktree.return_value = worktree_path  # type: ignore[union-attr]
+        cast("Any", orch._worktree_mgr.create_worktree).return_value = worktree_path
 
         with (
             patch("harness.agents.orchestrator.is_worktree_dirty", return_value=False),
@@ -393,14 +393,14 @@ class TestImplementInWorktree:
         assert result == "wt 구현 보고서"
         orch._sync_from_worktree.assert_called_once_with(worktree_path, ANY)
         # merge_token_usage 호출 확인
-        orch.generator.merge_token_usage.assert_called_once_with(mock_gen_instance)  # type: ignore[union-attr]
+        cast("Any", orch.generator.merge_token_usage).assert_called_once_with(mock_gen_instance)
 
     def test_no_sync_on_exception(self, tmp_path: Path) -> None:
         orch = self._make_orch(tmp_path)
 
         worktree_path = tmp_path / "wt"
         worktree_path.mkdir()
-        orch._worktree_mgr.create_worktree.return_value = worktree_path  # type: ignore[union-attr]
+        cast("Any", orch._worktree_mgr.create_worktree).return_value = worktree_path
 
         with (
             patch("harness.agents.orchestrator.is_worktree_dirty", return_value=False),
@@ -418,7 +418,7 @@ class TestImplementInWorktree:
         # 예외 발생 시 동기화 호출 없음
         orch._sync_from_worktree.assert_not_called()
         # worktree는 항상 cleanup
-        orch._worktree_mgr.cleanup_worktree.assert_called_once()  # type: ignore[union-attr]
+        cast("Any", orch._worktree_mgr.cleanup_worktree).assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +553,66 @@ class TestCriteriaMdConnection:
             call_kwargs = mock_eval.evaluate_sprint.call_args
             assert "criteria_md" in call_kwargs.kwargs
 
+    def test_resume_preserves_existing_phase_index_status(self, tmp_path: Path) -> None:
+        """중간 재개 시 완료된 Phase 상태를 pending으로 덮어쓰지 않는다."""
+        config = HarnessConfig(project_dir=str(tmp_path), save_artifacts=False)
+
+        with (
+            patch("harness.agents.orchestrator.PlannerAgent"),
+            patch("harness.agents.orchestrator.GeneratorAgent") as mock_gen_cls,
+            patch("harness.agents.orchestrator.EvaluatorAgent") as mock_eval_cls,
+            patch("harness.agents.orchestrator.ReviewArtifactManager"),
+            patch("harness.agents.orchestrator.ContractStore") as mock_contract_cls,
+            patch("harness.agents.orchestrator.CriteriaGenerator") as mock_criteria_cls,
+            patch("harness.agents.orchestrator.IntentGenerator"),
+            patch("harness.agents.orchestrator.WorktreeManager"),
+            patch("harness.agents.orchestrator.CheckpointStore"),
+        ):
+            from harness.agents.evaluator import EvaluationResult
+            from harness.agents.planner import ProductSpec
+            from harness.context.checkpoint import SessionState, SprintState
+            from harness.context.phase_manager import PhaseStatus
+
+            mock_gen = MagicMock()
+            mock_gen.run.return_value = "제안"
+            mock_gen.implement_sprint.return_value = "보고서"
+            mock_gen_cls.return_value = mock_gen
+
+            mock_eval = MagicMock()
+            mock_eval.negotiate_contract.return_value = "계약"
+            mock_eval.evaluate_sprint.return_value = EvaluationResult(
+                sprint_number=1, passed=True, overall_score=8.0,
+                criteria_scores=[], bugs_found=[], summary="", detailed_feedback="",
+            )
+            mock_eval_cls.return_value = mock_eval
+
+            mock_criteria = MagicMock()
+            mock_criteria.generate.return_value = []
+            mock_criteria.to_markdown.return_value = ""
+            mock_criteria_cls.return_value = mock_criteria
+            mock_contract_cls.return_value.load.return_value = None
+
+            orch = HarnessOrchestrator(config)
+            sprint_info = {"number": 1, "name": "Sprint", "goal": "goal"}
+            orch.spec = ProductSpec(
+                title="T", description="", features=[],
+                design_language={}, tech_stack={}, sprints=[sprint_info],
+            )
+            orch._session = SessionState(
+                run_id="test",
+                user_prompt="test",
+                sprints=[SprintState(sprint_number=1, started=True, current_attempt=1)],
+            )
+            existing = orch._phase_mgr.create_phases(1, "Sprint")
+            existing.phases[0].status = PhaseStatus.DONE.value
+            orch._phase_mgr.save_task_index(existing)
+
+            orch._execute_sprint(1, sprint_info)
+
+            reloaded = orch._phase_mgr.load_task_index(1)
+            assert reloaded is not None
+            assert reloaded.phases[0].status == PhaseStatus.DONE.value
+
 
 # ---------------------------------------------------------------------------
 # Modify Mode
@@ -592,16 +652,16 @@ class TestModifyMode:
             tech_stack={},
             sprints=[{"number": 1, "name": "수정", "features": [], "goal": "수정"}],
         )
-        orch.planner.run.return_value = mock_spec  # type: ignore[union-attr]
+        cast("Any", orch.planner.run).return_value = mock_spec
 
         mock_ctx = ModifyContext(git_branch="feature/test")
-        orch._modify_ctx_collector.collect.return_value = mock_ctx  # type: ignore[union-attr]
+        cast("Any", orch._modify_ctx_collector.collect).return_value = mock_ctx
 
         result = orch._plan_modify("기능 추가")
 
         assert result.title == "수정 작업"
-        orch._modify_ctx_collector.collect.assert_called_once()  # type: ignore[union-attr]
-        call_args = orch.planner.run.call_args  # type: ignore[union-attr]
+        cast("Any", orch._modify_ctx_collector.collect).assert_called_once()
+        call_args = cast("Any", orch.planner.run).call_args
         assert "수정 요청" in call_args.args[0]
         assert "기능 추가" in call_args.args[0]
 
@@ -675,7 +735,7 @@ class TestModifyMode:
             use_worktree_isolation=True, save_artifacts=False,
         )
 
-        captured: list[dict] = []
+        captured: list[dict[str, object]] = []
 
         def fake_gen_init(self_inner: object, **kwargs: object) -> None:
             captured.append(dict(kwargs))
@@ -710,7 +770,7 @@ class TestModifyMode:
                 patch.object(orch, "_sync_from_worktree", return_value=0),
                 patch.object(orch, "_worktree_mgr"),
             ):
-                orch._worktree_mgr.create_worktree.return_value = worktree_path
+                cast("Any", orch._worktree_mgr.create_worktree).return_value = worktree_path
                 orch._implement_in_worktree("spec", "contract", 1)
 
             # worktree 용 GeneratorAgent 생성 시 mode="modify"가 전달되어야 한다

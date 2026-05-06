@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -310,7 +310,7 @@ class TestOrchestratorResume:
             mock_intent_cls.return_value = mock_intent
 
             orch = HarnessOrchestrator(config)
-            orch.planner.total_cost = 0.0  # type: ignore[union-attr]
+            cast("Any", orch.planner).total_cost = 0.0
             result = orch.run("test", resume_run_id="resume-test")
 
             assert result["passed_sprints"] == 1
@@ -390,7 +390,7 @@ class TestOrchestratorResume:
             mock_intent_cls.return_value = mock_intent
 
             orch = HarnessOrchestrator(config)
-            orch.planner.total_cost = 0.0  # type: ignore[union-attr]
+            cast("Any", orch.planner).total_cost = 0.0
             result = orch.run("test", resume_run_id="latest")
 
             # load_latest가 호출됨

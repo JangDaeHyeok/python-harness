@@ -30,7 +30,8 @@ enforced_by:
    로드하여 카테고리·태그 기반 필터링을 제공한다.
 
 3. **criteria.py** (`CriteriaGenerator`): ADR과 컨벤션에서 평가 기준을
-   결정적 로직(LLM 불필요)으로 생성한다.
+   결정적 로직(LLM 불필요)으로 생성한다. ADR 로딩은 `harness/tools/adr.py`의
+   `ADRLoader`가 담당한다.
 
 4. **intent.py** (`IntentGenerator`): 스프린트 정보에서 `design-intent.md`를
    구조화된 형식으로 생성한다.

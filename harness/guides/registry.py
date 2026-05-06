@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Literal
 
 from harness.guides.prompts import DEFAULT_SYSTEM_PROMPTS, MODIFY_SYSTEM_PROMPTS
-from harness.review.criteria import ADRLoader, CriteriaGenerator
+from harness.review.criteria import CriteriaGenerator
+from harness.tools.adr import ADRLoader
 
 GuideName = Literal["planner", "generator", "evaluator"]
 

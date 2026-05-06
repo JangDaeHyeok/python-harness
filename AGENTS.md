@@ -2,6 +2,11 @@
 
 이 문서는 하네스 프레임워크 내에서 동작하는 AI 에이전트(Planner, Generator, Evaluator)가 참조하는 런타임 컨텍스트입니다.
 
+## 기술 스택
+- Python 3.11+
+- pyyaml, pydantic
+- pytest, ruff, mypy (dev)
+
 ## 에이전트 역할
 
 | 에이전트 | 역할 | 입력 | 출력 |
@@ -60,10 +65,54 @@ Evaluator가 사용할 수 있는 도구:
 9. **docs-diff 우선**: headless phase 모드에서는 Phase 1 이후 생성된 docs-diff를 구현 기준으로 삼는다 (ADR-0009)
 10. **Phase 계약 준수**: Phase 파일의 변경 허용 범위, 기대 산출물, 검증 방법을 지킨다
 11. **리뷰 자동화 안전성**: PR 리뷰 자동화는 ACCEPT로 분류된 코멘트만 자동 반영한다
+12. **경로 검증**: 파일 경로 접근은 `validate_path`로 검증한다
+13. **초기화 안전성**: `__init__`에서 부수 효과를 만들지 않는다
 
 ## 코드 컨벤션 위치
 - `docs/code-convention.yaml` — ConventionLoader로 로드
 - `harness_structure.yaml` — StructureAnalyzer로 검증
+
+## 프로젝트 구조
+
+```
+harness/
+├── agents/        # Planner, Generator, Evaluator, Orchestrator
+├── sensors/
+│   ├── computational/  # 린터, 테스트, 타입체커, 구조분석
+│   └── inferential/    # AI 코드 리뷰
+├── pipeline/      # ruff → mypy → 구조 → pytest → AI 리뷰 통합 파이프라인
+├── review/        # 리뷰 산출물, PR 본문, 반영 로그, docs-diff, 세션 포크
+├── guides/        # 시스템 프롬프트, 가이드 레지스트리, 컨텍스트 필터
+├── context/       # 세션 상태, 체크포인트, modify 컨텍스트, 프로젝트 정책, Phase 관리
+├── contracts/     # SprintContract 모델과 저장소
+└── tools/         # API 클라이언트, 파일 I/O, 셸 안전 래퍼, 경로 검증, ADR 로더
+```
+
+## 주요 명령어
+
+```bash
+pip install -e ".[dev]"           # 개발 의존성 설치
+python scripts/run_harness.py "프롬프트"  # create 모드
+python scripts/run_harness.py --mode modify "수정 요청"  # modify 모드
+python scripts/run_harness.py --mode modify --use-headless-phases "수정 요청"
+python scripts/run_harness.py --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
+python scripts/run_harness.py --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"
+python scripts/run_harness.py --resume
+python scripts/run_harness.py --run-id <run_id>
+python scripts/create_pr_body.py --base main
+python scripts/run_phases.py --sprint 1
+python scripts/run_phases.py --sprint 1 --require-docs-diff
+python scripts/auto_pr_pipeline.py --base main
+ruff check .
+mypy harness
+pytest
+python scripts/check_structure.py
+```
+
+## CLI 엔트리포인트
+- `harness` → `scripts.run_harness:main`
+- `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
+- `create-pr-body` → `scripts.create_pr_body:main`
 
 ## 산출물 경로
 
@@ -145,6 +194,7 @@ GitHub review thread resolve는 REST API 제약으로 답글 기반 확인으로
 - optional, nit, looks good, 칭찬성 코멘트는 DEFER로 분류하고 자동 반영하지 않는다.
 - ACCEPT 코멘트를 반영한 뒤 원본 코멘트에 한국어 답글을 남긴다.
 - thread resolve는 답글 기반 확인으로 대체한다.
+- CodeRabbit 자동 검증은 저장소에 CodeRabbit GitHub App이 설치되어 있고, `gh` CLI 인증이 되어 있다는 전제에서 동작한다.
 
 ## 품질 기준
 
@@ -169,6 +219,33 @@ GitHub review thread resolve는 REST API 제약으로 답글 기반 확인으로
 - `required_checks`는 Evaluator와 운영자가 확인해야 할 필수 검사 목록이다.
 - `conventions.source`, `adr.directory`, `structure.source`는 modify 컨텍스트 수집 기준 경로다.
 - `adr.external_sources`는 외부 프로젝트 ADR 디렉터리 절대 경로 목록이다. 경로가 존재하지 않으면 건너뛴다.
+- 외부 ADR은 modify 컨텍스트, GuideRegistry, ContextFilter 모두에 반영된다.
 - `artifacts`는 design-intent, code-quality-guide, review-comments, pr-body 산출물 생성 정책이다.
 - `custom_rules`는 프로젝트별 암묵지/금지사항/검증 규칙을 적는 자유 영역이다.
 - 정책 파일에는 비밀값이나 토큰을 넣지 않는다.
+- 정책 변경 후에는 `ruff check`, `mypy harness`, `python scripts/check_structure.py`, `pytest`를 실행한다.
+
+## 체크포인트 재개 규약
+- `.harness/checkpoints/<run_id>.json`은 실행별 체크포인트다.
+- `.harness/checkpoints/latest.json`은 최근 실행 포인터다.
+- `--project-dir` 없이 `--resume` 또는 `--run-id`를 사용할 때 현재 디렉터리에 체크포인트가 있으면 현재 디렉터리의 modify 실행으로 재개한다.
+
+## 수정 모드 컨텍스트
+- 현재 git 브랜치, staged/unstaged diff, 변경 파일 목록을 수집한다.
+- 설계 의도, 코드 컨벤션, ADR, 구조 규칙, 최근 ruff/mypy 요약을 Planner에게 전달한다.
+- `.harness/project-policy.yaml`이 있으면 컨벤션·ADR·구조 규칙 경로와 프로젝트 정책을 반영한다.
+- 정책의 `adr.external_sources`가 있으면 외부 프로젝트 ADR도 함께 로드하여 Planner 컨텍스트에 포함한다.
+
+## ADR 목록
+
+| ADR | 제목 | 핵심 결정 |
+|-----|------|-----------|
+| 0001 | 3-에이전트 아키텍처 | Planner→Generator→Evaluator 파이프라인, 계약 협상 |
+| 0002 | 연산적 센서 우선 | 결정적 검사(ruff→mypy→구조→pytest) 후 AI 리뷰 |
+| 0003 | ADR 기반 아키텍처 규칙 | ADR + harness_structure.yaml 검증 |
+| 0004 | 리뷰 산출물 워크플로 | 브랜치별 설계 의도, 기준, PR 본문, 반영 로그 |
+| 0005 | 구조화 스프린트 계약 | raw 텍스트 보존 + 구조화 파싱, JSON 저장 |
+| 0006 | 체크포인트와 재개 | Phase enum, run_id 기반 세션 복원 |
+| 0007 | 가이드 레지스트리 | 시스템 프롬프트/컨텍스트 중앙 관리 |
+| 0008 | 수정 모드와 프로젝트 정책 | modify 구현, project-policy.yaml 정책 적용 |
+| 0009 | Phase 실행과 컨텍스트 격리 | docs-diff, Phase 분할, 컨텍스트 필터, 헤드리스 실행, PR 자동화 |

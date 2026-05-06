@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from harness.review.criteria import ADRLoader
+from harness.tools.adr import ADRLoader
 from harness.tools.path_safety import sanitize_branch_name
 
 if TYPE_CHECKING:

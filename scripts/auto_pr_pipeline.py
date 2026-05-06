@@ -423,6 +423,7 @@ def run_pipeline(
             result.review_applied = applied
 
             if applied:
+                committed = False
                 try:
                     _run_git(["add", "-A"], str(project_dir))
                     _run_git(
@@ -430,14 +431,16 @@ def run_pipeline(
                         str(project_dir),
                     )
                     _run_git(["push"], str(project_dir))
+                    committed = True
                 except PipelineError as e:
                     result.errors.append(f"리뷰 반영 커밋 실패: {e}")
-                result.replies_posted = post_review_replies(
-                    project_dir,
-                    pr_info.number,
-                    result.actionable_comments,
-                    applied=applied,
-                )
+                if committed:
+                    result.replies_posted = post_review_replies(
+                        project_dir,
+                        pr_info.number,
+                        result.actionable_comments,
+                        applied=applied,
+                    )
 
     if auto_merge and pr_info.number > 0:
         merged = merge_pr(project_dir, pr_info.number)

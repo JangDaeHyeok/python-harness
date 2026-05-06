@@ -13,7 +13,7 @@ from harness.sensors.computational.structure_test import StructureAnalyzer
 
 
 class TestStructureAnalyzer:
-    def _setup_project(self, tmp_path: Path, rules: list[dict]) -> StructureAnalyzer:
+    def _setup_project(self, tmp_path: Path, rules: list[dict[str, object]]) -> StructureAnalyzer:
         config = {"rules": rules}
         (tmp_path / "harness_structure.yaml").write_text(
             yaml.dump(config, allow_unicode=True)

@@ -45,13 +45,14 @@ Phase 정의에는 입력 파일, docs-diff 참조 경로, 변경 허용 범위,
 `claude --print` 모드로 Phase별 독립 세션을 서브프로세스로 실행한다.
 메인 세션의 컨텍스트를 보존하면서 구현 컨텍스트는 하위 세션에 격리한다.
 오케스트레이터는 기본적으로 기존 Generator 경로를 유지하되, `use_headless_phases=True` 또는 CLI `--use-headless-phases`가 지정되면 Phase 실행기를 구현 경로로 사용한다.
+중간 재개 시에는 기존 Phase 인덱스를 복원하여 완료된 Phase의 상태를 보존하고, Phase 프롬프트 파일이 이미 존재하면 재생성하지 않는다.
 
 ### 5. PR 자동화 파이프라인
 
 Git push → PR 생성 → 리뷰 수집 → 에이전트 반영 → 머지까지 전 과정을 자동화한다.
 리뷰 코멘트는 자동 반영 대상(ACCEPT), 보류(DEFER), 무시(IGNORE)로 먼저 분류한다.
 ACCEPT 코멘트만 헤드리스 에이전트에 전달하고, 판정 로그를 `review-comments.md`에 저장한다.
-반영 커밋이 생성되면 원본 PR 리뷰 코멘트에 한국어 답글을 남긴다.
+반영 커밋이 성공적으로 push된 경우에만 원본 PR 리뷰 코멘트에 한국어 답글을 남긴다.
 GitHub REST API만으로 안정적인 review thread resolve가 불가능한 경우가 있으므로, resolve 처리는 답글 기반 확인으로 대체한다.
 
 CodeRabbit은 PR에 리뷰 코멘트를 남기는 외부 리뷰어로 취급한다.
@@ -80,6 +81,7 @@ optional/nit/칭찬성 코멘트는 DEFER로 기록만 남긴다.
 - `harness/review/session_fork.py` — 세션 포크 설계 의도
 - `scripts/run_phases.py` — 헤드리스 Phase 실행기
 - `scripts/auto_pr_pipeline.py` — PR 자동화 파이프라인
+- `harness/tools/adr.py` — ADRLoader (criteria.py에서 분리)
 
 ### 수정 파일
 - `harness/agents/orchestrator.py` — Phase 분할, docs-diff, 컨텍스트 필터 통합

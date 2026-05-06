@@ -316,20 +316,29 @@ class HarnessOrchestrator:
         self.review_artifacts.save("code-quality-guide.md", criteria_md)
         logger.info("  [Sprint %d] 평가 기준 문서 생성 완료 (%d개)", sprint_num, len(criteria))
 
-        # Phase 분할 (Task/Phase 시스템)
-        task_index = self._phase_mgr.create_phases(
-            sprint_number=sprint_num,
-            task_name=str(sprint_info.get("name", f"Sprint {sprint_num}")),
-        )
-        self._phase_mgr.save_task_index(task_index)
-        for phase in task_index.phases:
-            prompt_content = self._phase_mgr.build_phase_prompt(
-                phase=phase,
-                sprint_contract=contract,
-                docs_diff_md=docs_diff_md if docs_diff.has_changes else "",
-                extra_context=filtered_criteria_md,
+        # Phase 분할 (Task/Phase 시스템). 중간 재개 시 기존 상태를 보존한다.
+        existing_task_index = self._phase_mgr.load_task_index(sprint_num)
+        if existing_task_index is not None and resuming_mid_sprint:
+            task_index = existing_task_index
+            logger.info("  [Sprint %d] 기존 Phase 인덱스 복원 (%d개)", sprint_num, len(task_index.phases))
+        else:
+            task_index = self._phase_mgr.create_phases(
+                sprint_number=sprint_num,
+                task_name=str(sprint_info.get("name", f"Sprint {sprint_num}")),
             )
-            self._phase_mgr.save_phase_prompt(sprint_num, phase, prompt_content)
+            self._phase_mgr.save_task_index(task_index)
+        for phase in task_index.phases:
+            phase_prompt_path = (
+                self._phase_mgr.tasks_dir / f"sprint-{sprint_num}" / phase.prompt_file
+            )
+            if not phase_prompt_path.exists():
+                prompt_content = self._phase_mgr.build_phase_prompt(
+                    phase=phase,
+                    sprint_contract=contract,
+                    docs_diff_md=docs_diff_md if docs_diff.has_changes else "",
+                    extra_context=filtered_criteria_md,
+                )
+                self._phase_mgr.save_phase_prompt(sprint_num, phase, prompt_content)
         logger.info("  [Sprint %d] Phase 분할 완료 (%d개)", sprint_num, len(task_index.phases))
 
         # 구현 + 평가 루프 (재개 시 완료된 attempt 건너뛰기)

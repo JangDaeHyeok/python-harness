@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import subprocess
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from harness.review.docs_diff import DocsDiff, DocsDiffGenerator, FileDiff
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestFileDiff:
@@ -134,7 +138,7 @@ class TestDocsDiffGeneratorParsing:
         diffs = DocsDiffGenerator._parse_unified_diff("")
         assert diffs == []
 
-    def test_generate_includes_untracked_docs(self, tmp_path) -> None:
+    def test_generate_includes_untracked_docs(self, tmp_path: Path) -> None:
         docs_dir = tmp_path / "docs"
         docs_dir.mkdir()
         (docs_dir / "new.md").write_text("# 새 문서\n내용\n", encoding="utf-8")

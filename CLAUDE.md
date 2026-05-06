@@ -32,7 +32,7 @@ harness/
 ├── guides/        # 시스템 프롬프트, 가이드 레지스트리, 유사 RAG 컨텍스트 필터 (ADR/컨벤션 컨텍스트 조립)
 ├── context/       # 세션 상태, 체크포인트, modify 컨텍스트, 프로젝트 정책, Phase 관리
 ├── contracts/     # 스프린트 계약 모델(SprintContract)과 저장소(ContractStore)
-└── tools/         # API 클라이언트, 파일 I/O, 셸 안전 래퍼, 경로 검증, 타입 변환
+└── tools/         # API 클라이언트, 파일 I/O, 셸 안전 래퍼, 경로 검증, 타입 변환, ADR 로더
 ```
 
 ## 문서 맵
@@ -110,7 +110,7 @@ pyproject.toml에 등록된 CLI 커맨드:
 - 리뷰 코멘트 판정은 `ACCEPT`, `DEFER`, `IGNORE` 중 하나다
 - `ACCEPT` 코멘트만 `claude --print` 리뷰 반영 세션에 전달한다
 - 판정 로그는 `.harness/review-artifacts/{branch}/review-comments.md`에 저장한다
-- 반영 성공 후 원본 PR 리뷰 코멘트에 한국어 답글을 남긴다
+- 반영 커밋이 성공적으로 push된 경우에만 원본 PR 리뷰 코멘트에 한국어 답글을 남긴다
 - GitHub review thread resolve는 답글 기반 확인으로 대체한다
 - CodeRabbit은 외부 리뷰어로 취급한다. CodeRabbit이 남긴 PR 인라인 코멘트도 동일하게 수집·분류·반영한다
 - CodeRabbit 자동 검증은 저장소에 CodeRabbit GitHub App이 설치되어 있고, `gh` CLI 인증이 되어 있다는 전제에서 동작한다

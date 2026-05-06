@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from harness.review.conventions import CodeConvention, ConventionLoader
-from harness.review.criteria import ADRLoader
+from harness.tools.adr import ADRLoader
 
 logger = logging.getLogger(__name__)
 

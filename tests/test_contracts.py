@@ -16,6 +16,8 @@ from harness.contracts.store import ContractStore
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from _pytest.logging import LogCaptureFixture
+
 
 # ---------------------------------------------------------------------------
 # AcceptanceCriterion
@@ -150,7 +152,7 @@ class TestSprintContractFromRawText:
         assert sc.raw_text == raw
         assert sc.sprint_number == 5
 
-    def test_warns_when_parsing_yields_nothing(self, caplog: logging.LogCaptureFixture) -> None:
+    def test_warns_when_parsing_yields_nothing(self, caplog: LogCaptureFixture) -> None:
         raw = "Some text without markdown structure but not empty"
         with caplog.at_level(logging.WARNING, logger="harness.contracts.models"):
             sc = SprintContract.from_raw_text(1, raw)
@@ -158,7 +160,7 @@ class TestSprintContractFromRawText:
         assert sc.acceptance_criteria == []
         assert "추출하지 못했습니다" in caplog.text
 
-    def test_no_warning_on_empty_text(self, caplog: logging.LogCaptureFixture) -> None:
+    def test_no_warning_on_empty_text(self, caplog: LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING, logger="harness.contracts.models"):
             SprintContract.from_raw_text(1, "")
         assert "추출하지 못했습니다" not in caplog.text

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 from scripts import run_harness
 
+if TYPE_CHECKING:
+    import pytest
 
-def test_main_passes_worktree_options_to_config(tmp_path) -> None:
+
+def test_main_passes_worktree_options_to_config(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     summary = {
         "title": "테스트",
@@ -49,7 +53,7 @@ def test_main_passes_worktree_options_to_config(tmp_path) -> None:
     mock_orchestrator.run.assert_called_once_with("앱을 만들어줘", resume_run_id="")
 
 
-def test_main_passes_headless_phase_options_to_config(tmp_path) -> None:
+def test_main_passes_headless_phase_options_to_config(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     summary = {
         "title": "테스트",
@@ -88,7 +92,7 @@ def test_main_passes_headless_phase_options_to_config(tmp_path) -> None:
     assert config.require_docs_diff_for_headless is False
 
 
-def test_main_passes_mode_to_config(tmp_path) -> None:
+def test_main_passes_mode_to_config(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     summary = {
         "title": "수정",
@@ -123,7 +127,7 @@ def test_main_passes_mode_to_config(tmp_path) -> None:
     assert config.mode == "modify"
 
 
-def test_main_default_mode_is_create(tmp_path) -> None:
+def test_main_default_mode_is_create(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     summary = {
         "title": "생성",
@@ -151,7 +155,7 @@ def test_main_default_mode_is_create(tmp_path) -> None:
     assert config.mode == "create"
 
 
-def test_modify_mode_defaults_to_current_dir(tmp_path) -> None:
+def test_modify_mode_defaults_to_current_dir(tmp_path: Path) -> None:
     """--mode modify에서 --project-dir 미지정 시 현재 디렉터리를 사용한다."""
     summary = {
         "title": "수정",
@@ -180,7 +184,7 @@ def test_modify_mode_defaults_to_current_dir(tmp_path) -> None:
     assert config.mode == "modify"
 
 
-def test_create_mode_defaults_to_project_subdir(tmp_path) -> None:
+def test_create_mode_defaults_to_project_subdir(tmp_path: Path) -> None:
     """--mode create에서 --project-dir 미지정 시 ./project를 사용한다."""
     summary = {
         "title": "생성",
@@ -209,7 +213,7 @@ def test_create_mode_defaults_to_project_subdir(tmp_path) -> None:
 
 
 def test_resume_defaults_to_current_dir_when_current_checkpoint_exists(
-    tmp_path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """modify 실행의 자연스러운 --resume은 현재 디렉터리 체크포인트를 우선한다."""
     (tmp_path / ".harness" / "checkpoints").mkdir(parents=True)
@@ -243,7 +247,7 @@ def test_resume_defaults_to_current_dir_when_current_checkpoint_exists(
 
 
 def test_run_id_defaults_to_current_dir_when_current_checkpoint_exists(
-    tmp_path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """--run-id도 현재 디렉터리의 해당 체크포인트를 찾아 modify로 재개한다."""
     (tmp_path / ".harness" / "checkpoints").mkdir(parents=True)
@@ -276,7 +280,7 @@ def test_run_id_defaults_to_current_dir_when_current_checkpoint_exists(
     mock_orchestrator.run.assert_called_once_with("", resume_run_id="abc123")
 
 
-def test_main_allows_resume_without_prompt(tmp_path) -> None:
+def test_main_allows_resume_without_prompt(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     summary = {
         "title": "재개",

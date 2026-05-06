@@ -903,7 +903,7 @@ python-harness/
 │   ├── review/                 # 리뷰 워크플로
 │   │   ├── artifacts.py        #   ReviewArtifactManager (브랜치별 산출물)
 │   │   ├── conventions.py      #   ConventionLoader (code-convention.yaml)
-│   │   ├── criteria.py         #   CriteriaGenerator, ADRLoader
+│   │   ├── criteria.py         #   CriteriaGenerator
 │   │   ├── intent.py           #   IntentGenerator (설계 의도)
 │   │   ├── reflection.py       #   ReviewReflection (리뷰 반영 판단)
 │   │   ├── pr_body.py          #   PRBodyGenerator
@@ -928,6 +928,7 @@ python-harness/
 │       ├── shell.py            #   run_command_safe, validate_command, validate_path
 │       ├── file_io.py          #   atomic_write_text
 │       ├── path_safety.py      #   sanitize_branch_name, validate_run_id
+│       ├── adr.py              #   ADRLoader (ADR 로드·필터링)
 │       └── json_types.py       #   타입 변환 유틸리티
 ├── scripts/                    # CLI 스크립트
 │   ├── run_harness.py          #   메인 하네스 실행 (create/modify/resume)
