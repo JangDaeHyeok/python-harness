@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -15,6 +16,7 @@ from harness.bootstrap import (
 )
 from harness.bootstrap.initializer import (
     ALL_TARGETS,
+    _validate_markdown,
     relative_path_for,
 )
 from harness.bootstrap.templates import (
@@ -46,6 +48,29 @@ class TestTemplates:
         loaded = yaml.safe_load(render_structure(ctx))
         assert "rules" in loaded
         assert any(r.get("type") == "required_files" for r in loaded["rules"])
+
+    def test_render_structure_no_print_debug_uses_default_directories(self) -> None:
+        """no_print_debug 규칙이 directories를 비우지 않는지 확인.
+
+        구조 분석기는 ``directories`` 키가 없을 때만 기본값 ``["."]``을 적용한다.
+        ``directories: []`` 같은 빈 리스트가 들어가면 어떤 디렉터리도 검사하지 않는
+        no-op 규칙이 되므로, 템플릿에서는 키 자체를 생략해야 한다.
+        """
+        ctx = TemplateContext(project_name="x", intent_summary="y")
+        loaded = yaml.safe_load(render_structure(ctx))
+        rule = next(r for r in loaded["rules"] if r["name"] == "no_print_debug")
+        assert "directories" not in rule
+
+    def test_render_adr_uses_today_date(self) -> None:
+        """ADR 템플릿의 date 필드가 오늘 날짜로 채워지는지 확인."""
+        ctx = TemplateContext(project_name="x", intent_summary="y")
+        out = render_adr(ctx)
+        today = _dt.date.today().isoformat()
+        assert f"date: {today}" in out
+
+    def test_render_adr_explicit_today_override(self) -> None:
+        ctx = TemplateContext(project_name="x", intent_summary="y", today="2099-01-02")
+        assert "date: 2099-01-02" in render_adr(ctx)
 
     def test_render_policy_yaml_has_required_keys(self) -> None:
         ctx = TemplateContext(project_name="my-svc", intent_summary="y", language="python")
@@ -159,6 +184,21 @@ class TestBootstrapInitializerOffline:
         assert "CREATED" in joined
 
 
+class TestValidateMarkdown:
+    def test_accepts_yaml_frontmatter_then_heading(self) -> None:
+        text = "---\nstatus: accepted\n---\n\n# 제목\n\n본문\n"
+        assert _validate_markdown(text) is True
+
+    def test_accepts_simple_heading(self) -> None:
+        assert _validate_markdown("# 제목\n본문") is True
+
+    def test_rejects_empty(self) -> None:
+        assert _validate_markdown("   \n") is False
+
+    def test_rejects_text_without_heading(self) -> None:
+        assert _validate_markdown("그냥 본문만 있고 헤딩이 없음") is False
+
+
 class TestBootstrapInitializerLLM:
     def _make_response(self, text: str) -> Any:
         block = MagicMock()
@@ -219,6 +259,29 @@ class TestBootstrapInitializerLLM:
 
         plan = result.plans[0]
         assert plan.source == "template"
+
+    def test_llm_adr_with_frontmatter_passes_validation(self, tmp_path: Path) -> None:
+        """ADR LLM 응답이 ``---`` frontmatter로 시작해도 검증을 통과해야 한다."""
+        client = MagicMock()
+        client.create_message.return_value = self._make_response(
+            "---\nstatus: accepted\ndate: 2099-01-02\n---\n\n"
+            "# ADR-0001: 제목\n\n## Context\n내용\n"
+        )
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=False,
+            client=client,
+            targets=[TargetKind.ADR],
+        )
+        result = initializer.run()
+
+        plan = result.plans[0]
+        assert plan.source == "llm"
+        body = (tmp_path / relative_path_for(TargetKind.ADR)).read_text()
+        assert body.startswith("---")
+        assert "ADR-0001" in body
 
     def test_llm_strips_code_fence(self, tmp_path: Path) -> None:
         client = MagicMock()

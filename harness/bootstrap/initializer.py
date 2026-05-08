@@ -181,7 +181,15 @@ def _validate_yaml(text: str) -> bool:
 
 
 def _validate_markdown(text: str) -> bool:
-    return bool(text.strip()) and "#" in text.splitlines()[0]
+    """마크다운 응답을 검증한다.
+
+    YAML frontmatter(``--- ... ---``)로 시작하는 ADR도 허용해야 하므로,
+    "첫 줄이 ``#``로 시작" 대신 "본문 어딘가에 ``#`` 헤딩이 한 줄 이상 존재"를
+    검사한다. 빈 응답은 거부한다.
+    """
+    if not text.strip():
+        return False
+    return any(line.lstrip().startswith("#") for line in text.splitlines())
 
 
 _LLM_VALIDATORS.update({
@@ -335,6 +343,8 @@ class BootstrapInitializer:
 
     def _write_file(self, target_path: Path, content: str) -> None:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        if not target_path.exists():
-            target_path.touch()
+        # atomic_write_text는 임시 파일에 쓰고 os.replace로 교체하므로
+        # 대상 파일이 미리 존재할 필요가 없다. touch()를 호출하면
+        # 쓰기 도중 실패 시 빈 파일이 잔류해 다음 실행에서 "이미 존재함"으로
+        # 잘못 스킵될 수 있어 제거했다.
         atomic_write_text(target_path, content, prefix=".bootstrap-")

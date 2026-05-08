@@ -122,7 +122,10 @@ def main() -> None:
     _setup_logging(args.verbose)
 
     project_dir = Path(args.project_dir).resolve()
-    project_dir.mkdir(parents=True, exist_ok=True)
+    # dry-run에서는 대상 디렉터리 생성도 부작용으로 보고 건너뛴다.
+    # 실제 쓰기 모드일 때만 누락된 부모 경로를 생성한다.
+    if not args.dry_run:
+        project_dir.mkdir(parents=True, exist_ok=True)
 
     targets = _parse_targets(args.only)
     client = _resolve_client(args.offline, args.api_endpoint)

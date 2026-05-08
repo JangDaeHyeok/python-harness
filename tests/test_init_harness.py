@@ -95,6 +95,8 @@ def test_main_dry_run_does_not_write(tmp_path: Path) -> None:
 
     for kind in ALL_TARGETS:
         assert not (project_dir / relative_path_for(kind)).exists()
+    # dry-run에서는 대상 디렉터리 자체도 만들면 안 된다.
+    assert not project_dir.exists()
 
 
 def test_main_uses_template_when_endpoint_missing(

@@ -7,7 +7,13 @@ LLM 호출이 불가하거나 실패했을 때 폴백으로 사용된다.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import datetime as _dt
+from dataclasses import dataclass, field
+
+
+def _today_iso() -> str:
+    """ADR 등에 기록될 오늘 날짜(ISO-8601)를 반환한다."""
+    return _dt.date.today().isoformat()
 
 
 @dataclass(frozen=True)
@@ -18,6 +24,7 @@ class TemplateContext:
     intent_summary: str
     language: str = "python"
     python_version: str = "3.11+"
+    today: str = field(default_factory=_today_iso)
 
     def as_mapping(self) -> dict[str, str]:
         return {
@@ -25,13 +32,14 @@ class TemplateContext:
             "intent_summary": self.intent_summary or "프로젝트 목적이 아직 정의되지 않았습니다.",
             "language": self.language,
             "python_version": self.python_version,
+            "today": self.today or _today_iso(),
         }
 
 
 _ADR_TEMPLATE = """\
 ---
 status: accepted
-date: 2026-05-08
+date: {today}
 ---
 
 # ADR-0001: {project_name} 프로젝트 초기 아키텍처 결정
@@ -104,7 +112,8 @@ rules:
   - name: no_print_debug
     type: forbidden_pattern
     pattern: '^\\s*print\\('
-    directories: []
+    # directories를 생략하면 프로젝트 루트(".")부터 검사한다.
+    # 검사 범위를 좁히려면 ["src", "app"] 처럼 명시적으로 지정한다.
     message: "print() 대신 logging을 사용하세요"
     severity: warning
 """
