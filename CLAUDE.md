@@ -71,6 +71,14 @@ auto-pr-pipeline --base main --auto-merge            # 리뷰 반영 후 자동 
 auto-pr-pipeline --base main --skip-review           # 리뷰 수집/반영 건너뛰기
 auto-pr-pipeline --base main --title "PR 제목" --no-poll  # 제목 지정, 폴링 비활성화
 
+# === harness-init (= python scripts/init_harness.py) ===
+harness-init --help                                          # 전체 옵션 확인
+harness-init --offline "사내 청구 자동화 도구"                  # 자연어 의도로 ADR/컨벤션/구조/정책 일괄 생성
+harness-init --project-dir ./billing --offline "PoC"         # 다른 디렉터리에 부트스트랩
+harness-init --only adr,policy --offline "데이터 파이프라인"     # 특정 항목만 생성/관리
+harness-init --force --only claude --offline "운영 가이드 갱신"  # 기존 파일 덮어쓰기
+harness-init --dry-run --offline "사전 검토"                    # 실제 파일 변경 없이 결과만 표시
+
 # === 스크립트 직접 실행 (CLI 단축 명령과 동일) ===
 python scripts/run_phases.py --sprint 1              # Phase별 헤드리스 실행
 python scripts/run_phases.py --sprint 1 --require-docs-diff  # docs-update 이후 docs-diff 필수
@@ -85,6 +93,7 @@ pyproject.toml에 등록된 CLI 커맨드 (`pip install -e .` 후 사용 가능)
 - `harness` → `scripts.run_harness:main`
 - `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`
+- `harness-init` → `scripts.init_harness:main`
 
 ## 리뷰 산출물 경로
 - `.harness/review-artifacts/{branch}/design-intent.md` — 설계 의도
@@ -130,6 +139,18 @@ pyproject.toml에 등록된 CLI 커맨드 (`pip install -e .` 후 사용 가능)
 - CodeRabbit은 외부 리뷰어로 취급한다. CodeRabbit이 남긴 PR 인라인 코멘트도 동일하게 수집·분류·반영한다
 - CodeRabbit 자동 검증은 저장소에 CodeRabbit GitHub App이 설치되어 있고, `gh` CLI 인증이 되어 있다는 전제에서 동작한다
 - optional/nit/칭찬성 CodeRabbit 코멘트는 DEFER로 남기고 자동 반영하지 않는다
+
+## 프로젝트 부트스트랩(harness-init) 운영
+- 새 프로젝트나 외부 프로젝트에 하네스 규칙 파일을 한 번에 배치할 때 사용한다
+- 대상 파일: `docs/adr/0001-initial-architecture.md`, `docs/code-convention.yaml`, `harness_structure.yaml`, `.harness/project-policy.yaml`, `CLAUDE.md`
+- 자연어 프롬프트로 프로젝트 의도를 전달하면 ADR 본문과 CLAUDE.md 요약에 반영된다
+- 기본 동작: 누락된 파일만 생성, 기존 파일은 보존(`--force`로 덮어쓰기)
+- `--only`로 특정 항목(`adr,convention,structure,policy,claude`)만 생성·관리한다
+- `--dry-run`은 실제 쓰기 없이 적용 결과를 미리 확인한다
+- LLM 엔드포인트(`HARNESS_API_ENDPOINT`)가 설정되어 있고 `--offline`이 아니면 LLM이 템플릿을 사용자의 의도에 맞게 다듬는다
+- LLM 호출 실패나 응답 검증 실패 시 내장 템플릿으로 안전하게 폴백한다 (예외 전파 금지)
+- 프로젝트 이름은 따옴표로 감싼 토큰을 우선 추출하고, 없으면 디렉터리명을 정규화하여 사용한다
+- `harness-init`은 어디까지나 초기 환경 구성용이며, 본격 수정·생성은 `harness` CLI를 사용한다
 
 ## 프로젝트 정책 파일 운영
 - 정책 파일 위치는 `.harness/project-policy.yaml`이다

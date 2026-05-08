@@ -21,6 +21,7 @@ dev = [
 harness = "scripts.run_harness:main"
 auto-pr-pipeline = "scripts.auto_pr_pipeline:main"
 create-pr-body = "scripts.create_pr_body:main"
+harness-init = "scripts.init_harness:main"
 
 [tool.ruff]
 target-version = "py311"

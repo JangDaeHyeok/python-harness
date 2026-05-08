@@ -11,9 +11,10 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
 - [설치](#설치)
 - [환경변수](#환경변수)
 - [빠른 시작](#빠른-시작)
+  - [구현부터 PR 리뷰 반영까지 한 번에 (End-to-End)](#구현부터-pr-리뷰-반영까지-한-번에-end-to-end)
 - [운영 시나리오](#운영-시나리오)
 - [사용법](#사용법)
-  - [구현부터 PR 리뷰 반영까지 한 번에 (End-to-End)](#구현부터-pr-리뷰-반영까지-한-번에-end-to-end)
+  - [프로젝트 부트스트랩 (harness-init)](#프로젝트-부트스트랩-harness-init)
   - [새 프로젝트 생성 (create 모드)](#새-프로젝트-생성-create-모드)
   - [기존 코드베이스 수정 (modify 모드)](#기존-코드베이스-수정-modify-모드)
   - [중단된 실행 재개](#중단된-실행-재개)
@@ -21,6 +22,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
   - [헤드리스 Phase 실행](#헤드리스-phase-실행)
   - [PR 본문 생성](#pr-본문-생성)
   - [PR 자동화 파이프라인](#pr-자동화-파이프라인)
+  - [CodeRabbit 기반 자동 PR 검증](#coderabbit-기반-자동-pr-검증)
   - [품질 검사](#품질-검사)
   - [구조 규칙 검사](#구조-규칙-검사)
 - [CLI 옵션 레퍼런스](#cli-옵션-레퍼런스)
@@ -28,6 +30,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
   - [run_harness.py / harness](#run_harnesspy--harness)
   - [auto_pr_pipeline.py / auto-pr-pipeline](#auto_pr_pipelinepy--auto-pr-pipeline)
   - [create_pr_body.py / create-pr-body](#create_pr_bodypy--create-pr-body)
+  - [init_harness.py / harness-init](#init_harnesspy--harness-init)
 - [프로젝트 정책 파일](#프로젝트-정책-파일)
   - [정책 파일 위치와 기본값](#정책-파일-위치와-기본값)
   - [정책 파일 예시](#정책-파일-예시)
@@ -40,6 +43,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
   - [docs-diff 생성 방식](#docs-diff-생성-방식)
   - [유사 RAG 컨텍스트 필터링](#유사-rag-컨텍스트-필터링)
   - [PR 자동화 내부 흐름](#pr-자동화-내부-흐름)
+  - [품질 검사 파이프라인](#품질-검사-파이프라인)
 - [프로젝트 구조](#프로젝트-구조)
 - [산출물](#산출물)
 - [주요 API 사용법](#주요-api-사용법)
@@ -73,6 +77,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크입니
 | Phase/docs-diff 실행 | Phase 계약 생성, docs-update 후 docs-diff 갱신, 헤드리스 실행 | `harness/context/phase_manager.py`, `harness/review/docs_diff.py`, `scripts/run_phases.py` |
 | PR 자동화 | push, PR 생성, 리뷰 수집, headless 리뷰 반영, 선택적 머지 | `scripts/auto_pr_pipeline.py` |
 | 구조 규칙 | ADR 연계 의존성/필수 파일/금지 패턴 검사 | `harness_structure.yaml`, `scripts/check_structure.py` |
+| 프로젝트 부트스트랩 | 자연어 의도로 ADR/컨벤션/구조/정책/CLAUDE.md 일괄 생성, LLM 보강·실패 시 템플릿 폴백 | `harness/bootstrap/`, `scripts/init_harness.py` |
 
 ## 설치
 
@@ -110,13 +115,14 @@ pip install -e ".[dev]"
 
 ### 설치 후 CLI 확인
 
-`pip install -e .`로 설치하면 세 개의 CLI 커맨드가 등록됩니다.
+`pip install -e .`로 설치하면 네 개의 CLI 커맨드가 등록됩니다.
 
 | CLI 단축 명령 | 대응하는 스크립트 | 설명 |
 |---------------|-------------------|------|
 | `harness` | `python scripts/run_harness.py` | 메인 하네스 실행 (create/modify/resume) |
 | `auto-pr-pipeline` | `python scripts/auto_pr_pipeline.py` | PR 자동화 파이프라인 |
 | `create-pr-body` | `python scripts/create_pr_body.py` | PR 본문 생성 |
+| `harness-init` | `python scripts/init_harness.py` | 신규 프로젝트 부트스트랩 (ADR·컨벤션·구조 규칙·정책 파일 일괄 생성) |
 
 모든 옵션과 인자는 동일하게 사용할 수 있습니다. 이후 문서의 모든 `python scripts/...` 예시는 CLI 단축 명령으로 대체할 수 있습니다.
 
@@ -263,9 +269,47 @@ auto-pr-pipeline --base main
 | PR 생성/리뷰 반영 | `python scripts/auto_pr_pipeline.py --base main` | `auto-pr-pipeline --base main` | push, PR, 리뷰 수집, 반영, 답글 |
 | 자동 머지까지 | `python scripts/auto_pr_pipeline.py --base main --auto-merge` | `auto-pr-pipeline --base main --auto-merge` | 리뷰 반영 후 PR merge |
 | PR 본문 생성 | `python scripts/create_pr_body.py --base main` | `create-pr-body --base main` | diff 기반 PR 본문 자동 생성 |
+| 신규 프로젝트 부트스트랩 | `python scripts/init_harness.py --offline "..."` | `harness-init --offline "..."` | ADR/컨벤션/구조/정책/CLAUDE.md 일괄 생성 |
+| 부트스트랩 일부만 갱신 | `python scripts/init_harness.py --only adr,policy --offline "..."` | `harness-init --only adr,policy --offline "..."` | 누락된 항목만 선택 생성·관리 |
 | 중단 후 재개 | `python scripts/run_harness.py --resume` | `harness --resume` | 현재 디렉터리의 latest 체크포인트 재개 |
 
 ## 사용법
+
+### 프로젝트 부트스트랩 (harness-init)
+
+처음 외부 프로젝트에 하네스를 적용할 때 가장 먼저 실행하는 명령입니다. 자연어로 프로젝트 의도를 전달하면 다음 파일을 자동으로 생성하거나 보강합니다.
+
+| 항목 | 경로 |
+|------|------|
+| 첫 ADR | `docs/adr/0001-initial-architecture.md` |
+| 코드 컨벤션 | `docs/code-convention.yaml` |
+| 구조 규칙 | `harness_structure.yaml` |
+| 프로젝트 정책 | `.harness/project-policy.yaml` |
+| 운영 가이드 | `CLAUDE.md` |
+
+```bash
+# 자연어 의도로 한 번에 부트스트랩 (LLM 엔드포인트가 있으면 LLM이 템플릿 보강)
+harness-init "사내 청구 자동화 도구를 만들고 있습니다. Python 3.11, FastAPI, PostgreSQL을 사용합니다."
+
+# LLM 호출 없이 내장 템플릿만 사용
+harness-init --offline "데이터 파이프라인 PoC"
+
+# 다른 디렉터리에 부트스트랩
+harness-init --project-dir ./billing --offline "PoC"
+
+# 특정 파일만 생성·관리
+harness-init --only adr,policy --offline "사내 검색 백엔드"
+
+# 기존 파일 덮어쓰기 (주의)
+harness-init --force --only claude --offline "운영 가이드 갱신"
+
+# 실제 변경 없이 미리 보기
+harness-init --dry-run --offline "사전 검토"
+```
+
+기본 동작은 **누락된 파일만 생성**합니다. 기존 파일은 보존되며, 덮어쓰려면 `--force`를 명시해야 합니다. LLM 호출이 실패하거나 응답 검증에 실패하면 안전하게 내장 템플릿으로 폴백합니다(예외 전파 없음).
+
+부트스트랩이 끝나면 `.harness/project-policy.yaml`을 점검·수정하고 본격적인 작업은 `harness` CLI(create/modify)로 이어 가면 됩니다.
 
 ### 새 프로젝트 생성 (create 모드)
 
@@ -736,6 +780,27 @@ create-pr-body [OPTIONS]
 | `--output` | `None` | 출력 파일 경로. 미지정 시 표준 출력 |
 | `--branch` | `None` | 산출물 브랜치명 오버라이드 |
 | `--use-worktree` | `false` | worktree 격리 실행 |
+
+### init_harness.py / harness-init
+
+```
+python scripts/init_harness.py [PROMPT] [OPTIONS]
+harness-init [PROMPT] [OPTIONS]
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `prompt` | `""` | 프로젝트 의도를 설명하는 자연어. ADR/CLAUDE.md 본문에 반영 |
+| `--project-dir` | `.` | 부트스트랩 대상 프로젝트 루트 |
+| `--only` | `None` | 생성할 항목만 콤마로 지정 (`adr,convention,structure,policy,claude`) |
+| `--force` | `false` | 기존 파일도 덮어쓰기 |
+| `--offline` | `false` | LLM 호출 없이 내장 템플릿만 사용 |
+| `--dry-run` | `false` | 실제 쓰기 없이 결과만 출력 |
+| `--model` | `claude-sonnet-4-6` | LLM 호출 시 사용할 모델 |
+| `--api-endpoint` | `None` | LLM 엔드포인트 (미지정 시 `HARNESS_API_ENDPOINT`) |
+| `-v`, `--verbose` | `false` | 상세 로그 출력 |
+
+엔드포인트가 없거나 `--offline`이면 템플릿 기반으로 결정적인 결과를 만듭니다. 엔드포인트가 있으면 LLM이 템플릿을 사용자 의도에 맞게 보강하고, 응답이 검증에 실패하면 자동으로 템플릿으로 폴백합니다.
 
 ## 프로젝트 정책 파일
 

@@ -116,6 +116,14 @@ auto-pr-pipeline --help
 auto-pr-pipeline --base main
 auto-pr-pipeline --base main --auto-merge
 
+# === harness-init (= python scripts/init_harness.py) ===
+harness-init --help
+harness-init --offline "사내 청구 자동화 도구"
+harness-init --project-dir ./billing --offline "PoC"
+harness-init --only adr,policy --offline "데이터 파이프라인"
+harness-init --force --only claude --offline "운영 가이드 갱신"
+harness-init --dry-run --offline "사전 검토"
+
 # === 스크립트 직접 실행 (CLI 단축 명령 없음) ===
 python scripts/run_phases.py --sprint 1
 python scripts/run_phases.py --sprint 1 --require-docs-diff
@@ -130,6 +138,7 @@ python scripts/check_structure.py
 - `harness` → `scripts.run_harness:main`
 - `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`
+- `harness-init` → `scripts.init_harness:main` — 신규 프로젝트 부트스트랩(ADR/컨벤션/구조/정책 파일 일괄 생성)
 
 ## 산출물 경로
 
