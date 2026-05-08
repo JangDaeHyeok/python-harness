@@ -180,6 +180,43 @@ def _validate_yaml(text: str) -> bool:
     return isinstance(loaded, dict)
 
 
+def _validate_convention_yaml(text: str) -> bool:
+    """conventions 리스트가 존재하는지 검증한다."""
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(loaded, dict):
+        return False
+    conventions = loaded.get("conventions")
+    return isinstance(conventions, list) and len(conventions) > 0
+
+
+def _validate_structure_yaml(text: str) -> bool:
+    """rules 리스트가 존재하는지 검증한다."""
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(loaded, dict):
+        return False
+    rules = loaded.get("rules")
+    return isinstance(rules, list) and len(rules) > 0
+
+
+def _validate_policy_yaml(text: str) -> bool:
+    """project와 policies 딕셔너리가 존재하는지 검증한다."""
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(loaded, dict):
+        return False
+    return isinstance(loaded.get("project"), dict) and isinstance(
+        loaded.get("policies"), dict
+    )
+
+
 def _validate_markdown(text: str) -> bool:
     """마크다운 응답을 검증한다.
 
@@ -194,9 +231,9 @@ def _validate_markdown(text: str) -> bool:
 
 _LLM_VALIDATORS.update({
     TargetKind.ADR: _validate_markdown,
-    TargetKind.CONVENTION: _validate_yaml,
-    TargetKind.STRUCTURE: _validate_yaml,
-    TargetKind.POLICY: _validate_yaml,
+    TargetKind.CONVENTION: _validate_convention_yaml,
+    TargetKind.STRUCTURE: _validate_structure_yaml,
+    TargetKind.POLICY: _validate_policy_yaml,
     TargetKind.CLAUDE: lambda t: bool(t.strip()),
 })
 

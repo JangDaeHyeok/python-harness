@@ -16,7 +16,10 @@ from harness.bootstrap import (
 )
 from harness.bootstrap.initializer import (
     ALL_TARGETS,
+    _validate_convention_yaml,
     _validate_markdown,
+    _validate_policy_yaml,
+    _validate_structure_yaml,
     relative_path_for,
 )
 from harness.bootstrap.templates import (
@@ -199,6 +202,59 @@ class TestValidateMarkdown:
         assert _validate_markdown("그냥 본문만 있고 헤딩이 없음") is False
 
 
+class TestValidateConventionYaml:
+    def test_accepts_valid_conventions(self) -> None:
+        text = "conventions:\n  - id: x\n    description: y\n"
+        assert _validate_convention_yaml(text) is True
+
+    def test_rejects_missing_conventions_key(self) -> None:
+        assert _validate_convention_yaml("foo: bar\n") is False
+
+    def test_rejects_empty_conventions_list(self) -> None:
+        assert _validate_convention_yaml("conventions: []\n") is False
+
+    def test_rejects_non_list_conventions(self) -> None:
+        assert _validate_convention_yaml("conventions: not-a-list\n") is False
+
+    def test_rejects_invalid_yaml(self) -> None:
+        assert _validate_convention_yaml("not: valid: yaml: [") is False
+
+
+class TestValidateStructureYaml:
+    def test_accepts_valid_rules(self) -> None:
+        text = "rules:\n  - name: x\n    type: required_files\n"
+        assert _validate_structure_yaml(text) is True
+
+    def test_rejects_missing_rules_key(self) -> None:
+        assert _validate_structure_yaml("foo: bar\n") is False
+
+    def test_rejects_empty_rules_list(self) -> None:
+        assert _validate_structure_yaml("rules: []\n") is False
+
+    def test_rejects_non_dict(self) -> None:
+        assert _validate_structure_yaml("- item\n") is False
+
+
+class TestValidatePolicyYaml:
+    def test_accepts_valid_policy(self) -> None:
+        text = "project:\n  name: x\npolicies:\n  required_checks: [ruff]\n"
+        assert _validate_policy_yaml(text) is True
+
+    def test_rejects_missing_project(self) -> None:
+        assert _validate_policy_yaml("policies:\n  required_checks: []\n") is False
+
+    def test_rejects_missing_policies(self) -> None:
+        assert _validate_policy_yaml("project:\n  name: x\n") is False
+
+    def test_rejects_non_dict_project(self) -> None:
+        text = "project: not-a-dict\npolicies:\n  x: y\n"
+        assert _validate_policy_yaml(text) is False
+
+    def test_rejects_non_dict_policies(self) -> None:
+        text = "project:\n  name: x\npolicies: not-a-dict\n"
+        assert _validate_policy_yaml(text) is False
+
+
 class TestBootstrapInitializerLLM:
     def _make_response(self, text: str) -> Any:
         block = MagicMock()
@@ -286,7 +342,7 @@ class TestBootstrapInitializerLLM:
     def test_llm_strips_code_fence(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.create_message.return_value = self._make_response(
-            "```yaml\nproject:\n  name: fenced\nlanguage: python\n```"
+            "```yaml\nproject:\n  name: fenced\npolicies:\n  required_checks: [ruff]\n```"
         )
 
         initializer = BootstrapInitializer(
@@ -302,3 +358,73 @@ class TestBootstrapInitializerLLM:
         assert plan.source == "llm"
         loaded = yaml.safe_load((tmp_path / relative_path_for(TargetKind.POLICY)).read_text())
         assert loaded["project"]["name"] == "fenced"
+
+    def test_llm_structure_falls_back_on_missing_rules(self, tmp_path: Path) -> None:
+        """rules 키 없는 YAML이 오면 템플릿으로 폴백해야 한다."""
+        client = MagicMock()
+        client.create_message.return_value = self._make_response("foo: bar\n")
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=False,
+            client=client,
+            targets=[TargetKind.STRUCTURE],
+        )
+        result = initializer.run()
+
+        plan = result.plans[0]
+        assert plan.source == "template"
+        loaded = yaml.safe_load(
+            (tmp_path / relative_path_for(TargetKind.STRUCTURE)).read_text()
+        )
+        assert isinstance(loaded["rules"], list)
+        assert len(loaded["rules"]) > 0
+
+    def test_llm_convention_falls_back_on_missing_conventions(
+        self, tmp_path: Path
+    ) -> None:
+        """conventions 키 없는 YAML이 오면 템플릿으로 폴백해야 한다."""
+        client = MagicMock()
+        client.create_message.return_value = self._make_response("style: pep8\n")
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=False,
+            client=client,
+            targets=[TargetKind.CONVENTION],
+        )
+        result = initializer.run()
+
+        plan = result.plans[0]
+        assert plan.source == "template"
+        loaded = yaml.safe_load(
+            (tmp_path / relative_path_for(TargetKind.CONVENTION)).read_text()
+        )
+        assert isinstance(loaded["conventions"], list)
+        assert len(loaded["conventions"]) > 0
+
+    def test_llm_policy_falls_back_on_missing_policies(self, tmp_path: Path) -> None:
+        """policies 키 없는 YAML이 오면 템플릿으로 폴백해야 한다."""
+        client = MagicMock()
+        client.create_message.return_value = self._make_response(
+            "project:\n  name: x\n"
+        )
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=False,
+            client=client,
+            targets=[TargetKind.POLICY],
+        )
+        result = initializer.run()
+
+        plan = result.plans[0]
+        assert plan.source == "template"
+        loaded = yaml.safe_load(
+            (tmp_path / relative_path_for(TargetKind.POLICY)).read_text()
+        )
+        assert isinstance(loaded["project"], dict)
+        assert isinstance(loaded["policies"], dict)
