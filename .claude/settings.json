@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(ruff check *)",
+      "Bash(python -m ruff check *)",
+      "Bash(python3 -m ruff check *)",
+      "Bash(mypy *)",
+      "Bash(python -m mypy *)",
+      "Bash(python3 -m mypy *)",
+      "Bash(pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(python3 -m pytest *)",
+      "Bash(python scripts/*)",
+      "Bash(python3 scripts/*)",
+      "Bash(pip install -e .)",
+      "Bash(pip install -e \".[dev]\")",
+      "Bash(pip3 install -e .)",
+      "Bash(pip3 install -e \".[dev]\")",
+      "Bash(pip install --upgrade pip)",
+      "Bash(pip3 install --upgrade pip)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr status *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr create *)"
+    ],
+    "deny": [
+      "Read(./.venv/**)",
+      "Read(./.mypy_cache/**)",
+      "Read(./.ruff_cache/**)",
+      "Read(./.pytest_cache/**)",
+      "Read(./uv.lock)",
+      "Read(./**/__pycache__/**)",
+      "Read(./.harness/checkpoints/**)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./build/**)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/post_session_checks.sh\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard_no_print.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

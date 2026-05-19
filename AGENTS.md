@@ -31,6 +31,27 @@ Evaluator가 사용할 수 있는 도구:
 - `read_file`: 파일 읽기
 - `check_url`: URL 접근 확인
 
+## Claude Code 하네스 레이어 (자기 도그푸딩)
+
+본 저장소는 자신이 외부 프로젝트에 권장하는 하네스 5계층을 자기 자신에 적용한다. Phase Worker/Review Handler가 본 저장소에서 동작할 때 다음 환경을 가정한다.
+
+- **루트 CLAUDE.md**: 포인터·CRITICAL 규칙만 담은 얇은 계층 (≈65줄).
+- **서브패키지 CLAUDE.md**: `harness/agents/`, `harness/sensors/`, `harness/tools/`, `harness/review/`, `harness/context/`, `harness/guides/`, `harness/contracts/`, `harness/bootstrap/`, `harness/pipeline/`에 로컬 규칙이 있다. 해당 디렉터리에서 작업할 때 자동으로 추가 로드된다.
+- **운영 가이드**: 상세 명령·정책은 `docs/operations.md`. CLAUDE.md에서는 요약만 제공한다.
+- **Hooks** (`.claude/hooks/`):
+  - `post_session_checks.sh` — Stop 훅. `ruff → mypy → check_structure.py`를 결정적으로 실행한다. `CLAUDE_HOOK_SKIP=1`로 우회 가능.
+  - `guard_no_print.py` — PreToolUse 훅. Write/Edit/MultiEdit 시점에 `harness/` 내부 `print(` 패턴을 차단한다 (`tests/` 및 hook 자체는 예외).
+- **Skills** (`.claude/skills/`):
+  - `pr-review-triage` — 리뷰 코멘트 ACCEPT/DEFER/IGNORE 판정, 한국어 답글 템플릿, CodeRabbit 처리 규칙.
+  - `adr-author` — ADR 번호 규칙, 본문 형식, 자동 검증 연계 체크리스트.
+  - `phase-handoff` — Phase 핸드오프 파일(20줄 이내) 표준 형식.
+- **팀/개인 설정 분리**: `.claude/settings.json`(커밋, 팀 공유 allow/deny + hooks)과 `.claude/settings.local.json`(`.gitignore` 처리, 개인 오버라이드).
+
+에이전트가 본 저장소에서 동작할 때 유의할 점:
+- `print()` 작성은 hook이 막으므로 즉시 실패한다. logging을 사용한다.
+- 세션 종료 시 ruff/mypy/structure가 자동 실행되므로, 실패 가능성이 있는 변경은 미리 같은 명령으로 자체 검증해야 한다.
+- ADR/PR 리뷰/Phase 핸드오프 작업은 위 skill의 형식을 그대로 따른다.
+
 ## 실행 모드별 동작
 
 ### create 모드
@@ -54,19 +75,22 @@ Evaluator가 사용할 수 있는 도구:
 
 ## 아키텍처 규칙 (에이전트 필수 준수)
 
-1. **센서 독립성**: sensors/는 agents/를 임포트하지 않는다 (ADR-0001)
+규칙 옆 **[hook]** 표시는 `.claude/hooks/`에서 결정적으로 강제됨을 의미한다. 모델이 잊더라도 시스템이 차단한다.
+
+1. **센서 독립성**: sensors/는 agents/를 임포트하지 않는다 (ADR-0001, `harness_structure.yaml`로 검증)
 2. **검사 순서**: ruff → mypy → 구조 → pytest → AI 리뷰 (ADR-0002)
-3. **ADR 기록**: 아키텍처 결정은 docs/adr/에 기록한다 (ADR-0003)
-4. **타입 힌트**: 모든 public 함수에 타입 힌트 필수
-5. **셸 안전**: 셸 명령은 harness/tools/shell.py 래퍼 사용
-6. **print 금지**: harness/ 내부에서 print() 사용 금지, logging 사용
-7. **파싱 안전**: LLM 응답 파싱 실패 시 안전한 기본값으로 폴백
+3. **ADR 기록**: 아키텍처 결정은 docs/adr/에 기록한다 (ADR-0003). `pr-review-triage`/`adr-author` skill 형식을 따른다.
+4. **타입 힌트**: 모든 public 함수에 타입 힌트 필수 (mypy strict가 강제)
+5. **셸 안전**: 셸 명령은 `harness/tools/shell.py`의 `run_command_safe`/`validate_command` 사용
+6. **print 금지** **[hook]**: `harness/` 내부에서 `print()` 사용 금지, logging 사용. `guard_no_print.py` PreToolUse 훅이 차단.
+7. **파싱 안전**: LLM 응답 파싱 실패 시 안전한 기본값으로 폴백 (예외 전파 금지)
 8. **최소 변경**: modify 모드에서 불필요한 리팩터링, 추상화 금지
 9. **docs-diff 우선**: headless phase 모드에서는 Phase 1 이후 생성된 docs-diff를 구현 기준으로 삼는다 (ADR-0009)
-10. **Phase 계약 준수**: Phase 파일의 변경 허용 범위, 기대 산출물, 검증 방법을 지킨다
-11. **리뷰 자동화 안전성**: PR 리뷰 자동화는 ACCEPT로 분류된 코멘트만 자동 반영한다
+10. **Phase 계약 준수**: Phase 파일의 변경 허용 범위, 기대 산출물, 검증 방법을 지킨다. 핸드오프는 `phase-handoff` skill 형식을 따른다.
+11. **리뷰 자동화 안전성**: PR 리뷰 자동화는 ACCEPT로 분류된 코멘트만 자동 반영한다. `pr-review-triage` skill 참조.
 12. **경로 검증**: 파일 경로 접근은 `validate_path`로 검증한다
 13. **초기화 안전성**: `__init__`에서 부수 효과를 만들지 않는다
+14. **세션 종료 검증** **[hook]**: Stop 훅이 `ruff → mypy → check_structure.py`를 자동 실행한다. 위반이 남은 채로 세션을 종료하지 않는다.
 
 ## 코드 컨벤션 위치
 - `docs/code-convention.yaml` — ConventionLoader로 로드
@@ -76,17 +100,20 @@ Evaluator가 사용할 수 있는 도구:
 
 ```
 harness/
-├── agents/        # Planner, Generator, Evaluator, Orchestrator
+├── agents/        # Planner, Generator, Evaluator, Orchestrator (+ CLAUDE.md)
 ├── sensors/
 │   ├── computational/  # 린터, 테스트, 타입체커, 구조분석
 │   └── inferential/    # AI 코드 리뷰
-├── pipeline/      # ruff → mypy → 구조 → pytest → AI 리뷰 통합 파이프라인
-├── review/        # 리뷰 산출물, PR 본문, 반영 로그, docs-diff, 세션 포크
-├── guides/        # 시스템 프롬프트, 가이드 레지스트리, 컨텍스트 필터
-├── context/       # 세션 상태, 체크포인트, modify 컨텍스트, 프로젝트 정책, Phase 관리
-├── contracts/     # SprintContract 모델과 저장소
-└── tools/         # API 클라이언트, 파일 I/O, 셸 안전 래퍼, 경로 검증, ADR 로더
+├── pipeline/      # ruff → mypy → 구조 → pytest → AI 리뷰 통합 파이프라인 (+ CLAUDE.md)
+├── review/        # 리뷰 산출물, PR 본문, 반영 로그, docs-diff, 세션 포크 (+ CLAUDE.md)
+├── guides/        # 시스템 프롬프트, 가이드 레지스트리, 컨텍스트 필터 (+ CLAUDE.md)
+├── context/       # 세션 상태, 체크포인트, modify 컨텍스트, 프로젝트 정책, Phase 관리 (+ CLAUDE.md)
+├── contracts/     # SprintContract 모델과 저장소 (+ CLAUDE.md)
+├── bootstrap/     # harness-init 부트스트래퍼와 템플릿 (+ CLAUDE.md)
+└── tools/         # API 클라이언트, 파일 I/O, 셸 안전 래퍼, 경로 검증, ADR 로더 (+ CLAUDE.md)
 ```
+
+각 서브패키지 `CLAUDE.md`는 해당 디렉터리에서 작업할 때 자동으로 추가 로드된다 (Claude Code의 additive loading). 루트 `CLAUDE.md`에서 빠진 운영 명세는 `docs/operations.md`에 있다.
 
 ## 주요 명령어
 
@@ -121,6 +148,7 @@ harness-init --help
 harness-init --offline "사내 청구 자동화 도구"
 harness-init --project-dir ./billing --offline "PoC"
 harness-init --only adr,policy --offline "데이터 파이프라인"
+harness-init --only claude-config --offline "팀 셋업만 배포"   # .claude/settings.json + Stop 훅
 harness-init --force --only claude --offline "운영 가이드 갱신"
 harness-init --dry-run --offline "사전 검토"
 
@@ -138,7 +166,14 @@ python scripts/check_structure.py
 - `harness` → `scripts.run_harness:main`
 - `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`
-- `harness-init` → `scripts.init_harness:main` — 신규 프로젝트 부트스트랩(ADR/컨벤션/구조/정책 파일 일괄 생성)
+- `harness-init` → `scripts.init_harness:main` — 신규 프로젝트 부트스트랩. 대상 파일과 `.claude` 설정:
+  - `docs/adr/0001-initial-architecture.md`
+  - `docs/code-convention.yaml`
+  - `harness_structure.yaml`
+  - `.harness/project-policy.yaml`
+  - `CLAUDE.md`
+  - `.claude/settings.json` (`CLAUDE_CONFIG` 대상 — 팀 공유 allow/deny, **JSON 보안 설정이므로 LLM 위임을 명시적으로 차단**. allow 목록은 `gh pr view/list/diff/status/checks/comment/create *` 같은 좁힌 패턴만 사용하고, `gh api` 및 destructive 서브명령은 일부러 제외한다.)
+  - `.claude/hooks/post_session_checks.sh` (`CLAUDE_CONFIG` 선택 시 settings.json과 별도 plan으로 함께 생성. 쓰기 순서는 hook → settings.json 순으로 트랜잭션 안전성 확보. 기존 settings가 있어도 누락 시 복구. fresh 프로젝트에서는 없는 도구/파일 검사를 건너뛰고 `pytest` exit 5(no tests collected)는 성공 처리.)
 
 ## 산출물 경로
 

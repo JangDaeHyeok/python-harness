@@ -7,6 +7,7 @@
 - ``harness_structure.yaml``
 - ``.harness/project-policy.yaml``
 - ``CLAUDE.md`` (선택)
+- ``.claude/settings.json``과 Stop 훅 스크립트
 
 LLM 엔드포인트가 설정되어 있고 ``offline=False`` 인 경우, 자연어 요청을 기반으로
 각 파일 내용을 LLM이 다듬도록 시도한다. 호출이 실패하거나 응답이 비정상이면
@@ -28,8 +29,10 @@ from harness.bootstrap.templates import (
     TemplateContext,
     render_adr,
     render_claude_md,
+    render_claude_settings,
     render_convention,
     render_policy,
+    render_post_session_checks,
     render_structure,
 )
 from harness.tools.file_io import atomic_write_text
@@ -50,6 +53,7 @@ class TargetKind(Enum):
     STRUCTURE = "structure"
     POLICY = "policy"
     CLAUDE = "claude"
+    CLAUDE_CONFIG = "claude-config"
 
 
 ALL_TARGETS: tuple[TargetKind, ...] = (
@@ -58,6 +62,7 @@ ALL_TARGETS: tuple[TargetKind, ...] = (
     TargetKind.STRUCTURE,
     TargetKind.POLICY,
     TargetKind.CLAUDE,
+    TargetKind.CLAUDE_CONFIG,
 )
 
 _RELATIVE_PATHS: dict[TargetKind, Path] = {
@@ -66,6 +71,7 @@ _RELATIVE_PATHS: dict[TargetKind, Path] = {
     TargetKind.STRUCTURE: Path("harness_structure.yaml"),
     TargetKind.POLICY: Path(".harness/project-policy.yaml"),
     TargetKind.CLAUDE: Path("CLAUDE.md"),
+    TargetKind.CLAUDE_CONFIG: Path(".claude/settings.json"),
 }
 
 _LLM_VALIDATORS: dict[TargetKind, Callable[[str], bool]] = {}
@@ -238,6 +244,12 @@ _LLM_VALIDATORS.update({
 })
 
 
+# LLM 커스터마이즈를 건너뛰고 항상 템플릿을 사용할 대상 목록.
+# `.claude/settings.json`은 구조가 엄격하고 보안에 직결되므로 LLM에 위임하지 않는다.
+# 이 목록에 든 대상은 _LLM_VALIDATORS / _LLM_INSTRUCTIONS 에 등록할 필요가 없다.
+_LLM_SKIP_KINDS: frozenset[TargetKind] = frozenset({TargetKind.CLAUDE_CONFIG})
+
+
 _LLM_INSTRUCTIONS: dict[TargetKind, str] = {
     TargetKind.ADR: (
         "다음은 새 프로젝트의 첫 번째 ADR 초안 템플릿입니다. 사용자의 의도에 맞게 Context, "
@@ -297,12 +309,15 @@ class BootstrapInitializer:
             TargetKind.STRUCTURE: render_structure,
             TargetKind.POLICY: render_policy,
             TargetKind.CLAUDE: render_claude_md,
+            TargetKind.CLAUDE_CONFIG: render_claude_settings,
         }
 
         for kind in self.targets:
             target_path = self.project_dir / _RELATIVE_PATHS[kind]
             existed = target_path.exists()
             if existed and not self.force:
+                if kind is TargetKind.CLAUDE_CONFIG:
+                    self._append_missing_claude_hook_plan(result, ctx)
                 plan = BootstrapPlan(
                     kind=kind,
                     target_path=target_path,
@@ -317,7 +332,7 @@ class BootstrapInitializer:
             template_text = renderers[kind](ctx)
             content, source = self._maybe_customize_with_llm(kind, template_text, ctx)
 
-            plan = BootstrapPlan(
+            main_plan = BootstrapPlan(
                 kind=kind,
                 target_path=target_path,
                 content=content,
@@ -325,11 +340,52 @@ class BootstrapInitializer:
                 will_write=True,
                 source=source,
             )
-            if not self.dry_run:
-                self._write_file(target_path, content)
-            result.plans.append(plan)
+
+            if kind is TargetKind.CLAUDE_CONFIG:
+                # sidecar hook 도 항상 별도 plan으로 기록한다 (요약 가시성 일관화).
+                # 쓰기 순서는 hook → settings 순으로 두어, 중간 실패 시 다음 실행이
+                # 빈 settings.json을 만나지 않고 fresh 경로로 깔끔히 복구되게 한다.
+                hook_path = self._claude_hook_path()
+                hook_plan = BootstrapPlan(
+                    kind=TargetKind.CLAUDE_CONFIG,
+                    target_path=hook_path,
+                    content=render_post_session_checks(ctx),
+                    existed_before=hook_path.exists(),
+                    will_write=True,
+                    source="template",
+                )
+                if not self.dry_run:
+                    self._write_claude_hook_sidecar(ctx)
+                    self._write_file(target_path, content)
+                result.plans.append(main_plan)
+                result.plans.append(hook_plan)
+            else:
+                if not self.dry_run:
+                    self._write_file(target_path, content)
+                result.plans.append(main_plan)
 
         return result
+
+    def _append_missing_claude_hook_plan(
+        self, result: BootstrapResult, ctx: TemplateContext
+    ) -> None:
+        """CLAUDE_CONFIG sidecar hook이 누락된 경우 복구 계획을 추가한다."""
+        hook_path = self._claude_hook_path()
+        if hook_path.exists():
+            return
+
+        content = render_post_session_checks(ctx)
+        plan = BootstrapPlan(
+            kind=TargetKind.CLAUDE_CONFIG,
+            target_path=hook_path,
+            content=content,
+            existed_before=False,
+            will_write=True,
+            source="template",
+        )
+        if not self.dry_run:
+            self._write_claude_hook_sidecar(ctx)
+        result.plans.append(plan)
 
     def _build_template_context(self) -> TemplateContext:
         return TemplateContext(
@@ -341,6 +397,8 @@ class BootstrapInitializer:
         self, kind: TargetKind, template_text: str, ctx: TemplateContext
     ) -> tuple[str, str]:
         """LLM이 사용 가능하면 템플릿을 다듬도록 시도한다. 실패 시 템플릿 사용."""
+        if kind in _LLM_SKIP_KINDS:
+            return template_text, "template"
         if self.offline or self.client is None or not self.prompt.strip():
             return template_text, "template"
 
@@ -385,3 +443,16 @@ class BootstrapInitializer:
         # 쓰기 도중 실패 시 빈 파일이 잔류해 다음 실행에서 "이미 존재함"으로
         # 잘못 스킵될 수 있어 제거했다.
         atomic_write_text(target_path, content, prefix=".bootstrap-")
+
+    def _claude_hook_path(self) -> Path:
+        return self.project_dir / ".claude/hooks/post_session_checks.sh"
+
+    def _write_claude_hook_sidecar(self, ctx: TemplateContext) -> None:
+        hook_path = self._claude_hook_path()
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(
+            hook_path,
+            render_post_session_checks(ctx),
+            prefix=".bootstrap-",
+        )
+        hook_path.chmod(0o755)

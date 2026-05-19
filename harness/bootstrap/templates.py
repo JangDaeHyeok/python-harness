@@ -144,6 +144,65 @@ policies:
     pr_body: true
 """
 
+_CLAUDE_SETTINGS_TEMPLATE = """\
+{{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "{project_name} — harness-init이 생성한 Claude Code 팀 공유 설정. 개인 오버라이드는 .claude/settings.local.json에 둔다.",
+  "permissions": {{
+    "allow": [
+      "Bash(ruff check *)",
+      "Bash(python -m ruff check *)",
+      "Bash(python3 -m ruff check *)",
+      "Bash(mypy *)",
+      "Bash(python -m mypy *)",
+      "Bash(python3 -m mypy *)",
+      "Bash(pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(python3 -m pytest *)",
+      "Bash(python scripts/*)",
+      "Bash(python3 scripts/*)",
+      "Bash(pip install -e .)",
+      "Bash(pip install -e \\".[dev]\\")",
+      "Bash(pip3 install -e .)",
+      "Bash(pip3 install -e \\".[dev]\\")",
+      "Bash(pip install --upgrade pip)",
+      "Bash(pip3 install --upgrade pip)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr status *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr create *)"
+    ],
+    "deny": [
+      "Read(./.venv/**)",
+      "Read(./.mypy_cache/**)",
+      "Read(./.ruff_cache/**)",
+      "Read(./.pytest_cache/**)",
+      "Read(./**/__pycache__/**)",
+      "Read(./.harness/checkpoints/**)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./build/**)"
+    ]
+  }},
+  "hooks": {{
+    "Stop": [
+      {{
+        "matcher": "",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "\\"${{CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/post_session_checks.sh\\""
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
+"""
+
 _CLAUDE_TEMPLATE = """\
 # {project_name}
 
@@ -166,8 +225,78 @@ _CLAUDE_TEMPLATE = """\
 ruff check .
 mypy .
 pytest
-python scripts/check_structure.py  # harness 저장소 기준
+python3 scripts/check_structure.py  # 스크립트가 있는 저장소에서만
 ```
+"""
+
+_POST_SESSION_CHECKS_TEMPLATE = r"""#!/usr/bin/env bash
+set -uo pipefail
+
+if [ "${CLAUDE_HOOK_SKIP:-}" = "1" ]; then
+  echo "[post_session_checks] skipped by CLAUDE_HOOK_SKIP=1"
+  exit 0
+fi
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+cd "$PROJECT_DIR" || exit 1
+
+# mypy 가 venv·빌드 산출물·하네스 런타임 디렉터리로 흘러 들어가지 않게 정규식 제외.
+# 사용자의 pyproject.toml / mypy.ini 에서 추가 exclude 를 잡고 있어도 함께 누적 적용된다.
+MYPY_EXCLUDE_REGEX='(^|/)(\.venv|\.harness|build|dist)(/|$)'
+
+run_optional() {
+  local label="$1"
+  shift
+  if "$@"; then
+    return 0
+  fi
+  local status=$?
+  echo "[post_session_checks] ${label} failed with exit code ${status}"
+  return "$status"
+}
+
+if command -v ruff >/dev/null 2>&1; then
+  run_optional "ruff" ruff check . || exit $?
+else
+  echo "[post_session_checks] ruff not installed; skipping"
+fi
+
+if command -v mypy >/dev/null 2>&1; then
+  if find . -path ./.venv -prune -o -path ./.harness -prune -o -name '*.py' -print -quit | grep -q .; then
+    run_optional "mypy" mypy --exclude "$MYPY_EXCLUDE_REGEX" . || exit $?
+  else
+    echo "[post_session_checks] no Python files found; skipping mypy"
+  fi
+else
+  echo "[post_session_checks] mypy not installed; skipping"
+fi
+
+if [ -f scripts/check_structure.py ]; then
+  run_optional "structure" python3 scripts/check_structure.py || exit $?
+else
+  echo "[post_session_checks] scripts/check_structure.py not found; skipping structure"
+fi
+
+if command -v pytest >/dev/null 2>&1; then
+  if [ -d tests ]; then
+    # pytest exit code 5 = "no tests collected"; fresh project 직후엔 정상이므로 성공 처리.
+    if pytest -q; then
+      :
+    else
+      pytest_status=$?
+      if [ "$pytest_status" = "5" ]; then
+        echo "[post_session_checks] pytest collected no tests; treating as success"
+      else
+        echo "[post_session_checks] pytest failed with exit code ${pytest_status}"
+        exit "$pytest_status"
+      fi
+    fi
+  else
+    echo "[post_session_checks] tests/ not found; skipping pytest"
+  fi
+else
+  echo "[post_session_checks] pytest not installed; skipping"
+fi
 """
 
 
@@ -194,3 +323,17 @@ def render_policy(ctx: TemplateContext) -> str:
 def render_claude_md(ctx: TemplateContext) -> str:
     """기본 CLAUDE.md를 렌더링한다."""
     return _CLAUDE_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_claude_settings(ctx: TemplateContext) -> str:
+    """기본 .claude/settings.json을 렌더링한다.
+
+    JSON 본문에 ``{`` / ``}`` 이 그대로 들어가 있으므로 템플릿에서는 ``{{`` /
+    ``}}`` 로 이중 이스케이프 되어 있다. ``project_name`` 만 치환된다.
+    """
+    return _CLAUDE_SETTINGS_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_post_session_checks(_: TemplateContext) -> str:
+    """fresh 프로젝트에서 안전하게 동작하는 Stop 훅 스크립트를 렌더링한다."""
+    return _POST_SESSION_CHECKS_TEMPLATE

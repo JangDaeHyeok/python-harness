@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json as _json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -29,6 +30,59 @@ from harness.bootstrap.templates import (
     render_policy,
     render_structure,
 )
+
+_SAFE_PIP_ALLOW = {
+    "Bash(pip install -e .)",
+    'Bash(pip install -e ".[dev]")',
+    "Bash(pip3 install -e .)",
+    'Bash(pip3 install -e ".[dev]")',
+    "Bash(pip install --upgrade pip)",
+    "Bash(pip3 install --upgrade pip)",
+}
+
+_SAFE_GH_ALLOW = {
+    "Bash(gh pr view *)",
+    "Bash(gh pr list *)",
+    "Bash(gh pr diff *)",
+    "Bash(gh pr status *)",
+    "Bash(gh pr checks *)",
+    "Bash(gh pr comment *)",
+    "Bash(gh pr create *)",
+}
+
+
+def _assert_claude_settings_allow_is_narrow(allow: list[str]) -> None:
+    """Claude Code 팀 공유 allow 목록이 넓은 권한을 열지 않는지 검증한다."""
+    assert "Bash(pip install *)" not in allow
+    assert "Bash(pip3 install *)" not in allow
+    assert "Bash(.venv/bin/pip install *)" not in allow
+    assert "Bash(gh pr *)" not in allow
+    assert "Bash(gh api *)" not in allow
+    assert "Bash(gh api repos/*)" not in allow
+
+    missing_pip = _SAFE_PIP_ALLOW - set(allow)
+    assert not missing_pip, f"누락된 pip allow 패턴: {missing_pip}"
+
+    missing_gh = _SAFE_GH_ALLOW - set(allow)
+    assert not missing_gh, f"누락된 gh allow 패턴: {missing_gh}"
+
+    for forbidden in ("gh pr merge", "gh pr close", "gh pr reopen", "gh pr edit"):
+        for entry in allow:
+            assert forbidden not in entry, (
+                f"destructive gh 서브명령이 allow에 포함됨: {entry}"
+            )
+
+
+class TestRepoClaudeSettings:
+    def test_committed_team_settings_keep_permissions_narrow(self) -> None:
+        """실제 커밋되는 .claude/settings.json도 템플릿과 같은 보안 정책을 따라야 한다."""
+        repo_root = Path(__file__).resolve().parents[1]
+        settings_path = repo_root / ".claude/settings.json"
+
+        loaded = _json.loads(settings_path.read_text(encoding="utf-8"))
+        allow: list[str] = loaded["permissions"]["allow"]
+
+        _assert_claude_settings_allow_is_narrow(allow)
 
 
 class TestTemplates:
@@ -110,10 +164,12 @@ class TestBootstrapInitializerOffline:
         )
         result = initializer.run()
 
-        assert result.created_count == len(ALL_TARGETS)
+        # CLAUDE_CONFIG는 settings.json + sidecar hook 2개의 plan을 emit한다.
+        assert result.created_count == len(ALL_TARGETS) + 1
         assert result.skipped_count == 0
         for kind in ALL_TARGETS:
             assert (tmp_path / relative_path_for(kind)).exists()
+        assert (tmp_path / ".claude/hooks/post_session_checks.sh").exists()
 
     def test_skips_existing_files_without_force(self, tmp_path: Path) -> None:
         target = tmp_path / relative_path_for(TargetKind.POLICY)
@@ -185,6 +241,397 @@ class TestBootstrapInitializerOffline:
         result = initializer.run()
         joined = "\n".join(result.summary_lines())
         assert "CREATED" in joined
+
+    def test_claude_config_target_emits_valid_settings_json(
+        self, tmp_path: Path
+    ) -> None:
+        """`.claude/settings.json`이 유효한 JSON으로 기록되고 핵심 키를 포함해야 한다."""
+        import json as _json
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="플러그인 패키징 테스트",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        plan = result.plans[0]
+        assert plan.kind == TargetKind.CLAUDE_CONFIG
+        assert plan.source == "template"
+
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        assert settings_path.exists()
+        loaded = _json.loads(settings_path.read_text(encoding="utf-8"))
+        assert "permissions" in loaded
+        assert "hooks" in loaded
+        assert isinstance(loaded["permissions"].get("allow"), list)
+        assert isinstance(loaded["permissions"].get("deny"), list)
+        deny = loaded["permissions"]["deny"]
+        assert "Read(./.harness/tasks/**)" not in deny
+        assert "Read(./.harness/review-artifacts/**)" not in deny
+        stop_hooks = loaded["hooks"]["Stop"][0]["hooks"]
+        assert (
+            stop_hooks[0]["command"]
+            == '"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/post_session_checks.sh"'
+        )
+
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        assert hook_path.exists()
+        hook_text = hook_path.read_text(encoding="utf-8")
+        assert "scripts/check_structure.py not found; skipping structure" in hook_text
+        assert "pytest -q" in hook_text
+        assert hook_path.stat().st_mode & 0o111
+
+    def test_claude_config_fresh_path_emits_separate_sidecar_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """fresh CLAUDE_CONFIG 경로도 settings.json + sidecar hook을 각각 별도 plan으로
+        보고해서, 요약 출력이 repair 경로와 비대칭이 되지 않아야 한다.
+        """
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="plan 비대칭 회귀 보호",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+
+        # CLAUDE_CONFIG 한 대상에서 plan 2개(main + sidecar)가 나와야 한다.
+        config_plans = [p for p in result.plans if p.kind == TargetKind.CLAUDE_CONFIG]
+        assert len(config_plans) == 2
+
+        settings_plan = next(p for p in config_plans if p.target_path == settings_path)
+        hook_plan = next(p for p in config_plans if p.target_path == hook_path)
+        assert settings_plan.status == "created"
+        assert hook_plan.status == "created"
+        assert settings_plan.existed_before is False
+        assert hook_plan.existed_before is False
+
+        # 요약 출력에도 hook 파일이 등장해야 한다.
+        joined_summary = "\n".join(result.summary_lines())
+        assert ".claude/hooks/post_session_checks.sh" in joined_summary
+        assert ".claude/settings.json" in joined_summary
+
+    def test_claude_config_repairs_missing_sidecar_hook(
+        self, tmp_path: Path
+    ) -> None:
+        """settings.json이 있어도 누락된 Stop hook은 다시 생성해야 한다."""
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text('{"hooks": {}}\n', encoding="utf-8")
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="팀 셋업",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        assert hook_path.exists()
+        assert hook_path.stat().st_mode & 0o111
+        assert settings_path.read_text(encoding="utf-8") == '{"hooks": {}}\n'
+
+        hook_plan = next(p for p in result.plans if p.target_path == hook_path)
+        settings_plan = next(p for p in result.plans if p.target_path == settings_path)
+        assert hook_plan.status == "created"
+        assert settings_plan.status == "skipped"
+
+    def test_claude_config_skips_llm_customization(self, tmp_path: Path) -> None:
+        """LLM 클라이언트가 있어도 CLAUDE_CONFIG는 호출 자체가 일어나면 안 된다."""
+        client = MagicMock()
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=False,
+            client=client,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        client.create_message.assert_not_called()
+        assert result.plans[0].source == "template"
+
+    def test_claude_config_force_overwrites_existing_settings(
+        self, tmp_path: Path
+    ) -> None:
+        """--force 시 기존 settings.json은 템플릿으로 교체되고 sidecar 훅도 함께 생긴다."""
+        import json as _json
+
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_body = '{"_legacy": true}\n'
+        settings_path.write_text(legacy_body, encoding="utf-8")
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="force 재배포",
+            offline=True,
+            force=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        # 기존 본문이 사라지고 유효한 JSON 템플릿으로 교체되어야 한다.
+        new_text = settings_path.read_text(encoding="utf-8")
+        assert new_text != legacy_body
+        loaded = _json.loads(new_text)
+        assert "permissions" in loaded and "hooks" in loaded
+
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        assert hook_path.exists()
+        assert hook_path.stat().st_mode & 0o111
+
+        settings_plan = next(
+            p for p in result.plans if p.target_path == settings_path
+        )
+        assert settings_plan.status == "updated"
+        assert settings_plan.source == "template"
+
+    def test_claude_config_dry_run_writes_nothing(self, tmp_path: Path) -> None:
+        """dry_run=True 일 때 settings.json·sidecar 모두 디스크에 만들지 않는다."""
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="dry-run 검증",
+            offline=True,
+            dry_run=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        assert not settings_path.exists()
+        assert not hook_path.exists()
+
+        # plan 상에는 created로 잡혀야 한다 (실제 쓰기만 보류된 상태).
+        plan = result.plans[0]
+        assert plan.kind == TargetKind.CLAUDE_CONFIG
+        assert plan.status == "created"
+        assert "[DRY-RUN]" in result.summary_lines()[0]
+
+    def test_claude_config_repair_dry_run_does_not_write_sidecar(
+        self, tmp_path: Path
+    ) -> None:
+        """기존 settings.json 보유 + dry_run 일 때 sidecar 복구도 디스크 변경 없음."""
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        existing = '{"hooks": {}}\n'
+        settings_path.write_text(existing, encoding="utf-8")
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="복구 시나리오 dry-run",
+            offline=True,
+            dry_run=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        result = initializer.run()
+
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        assert not hook_path.exists()
+        # 기존 settings.json 도 그대로 유지.
+        assert settings_path.read_text(encoding="utf-8") == existing
+
+        # 그래도 복구 plan 항목은 잡혀 있어야 한다.
+        hook_plan = next(p for p in result.plans if p.target_path == hook_path)
+        assert hook_plan.status == "created"
+        assert hook_plan.will_write is True
+
+    def test_post_session_checks_template_safety(self, tmp_path: Path) -> None:
+        """렌더된 Stop 훅 본문에 안전 옵션·exclude·skip 메시지가 들어 있어야 하고,
+        bash 구문 자체에도 에러가 없어야 한다.
+        """
+        import shutil
+        import subprocess
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="훅 안전성 검증",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        initializer.run()
+
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        hook_text = hook_path.read_text(encoding="utf-8")
+
+        # (a) pipefail 활성화
+        assert "set -uo pipefail" in hook_text
+        # (b) mypy 가 venv·빌드 산출물·하네스 디렉터리를 제외
+        assert "MYPY_EXCLUDE_REGEX=" in hook_text
+        assert r"\.venv" in hook_text
+        assert r"\.harness" in hook_text
+        assert "build" in hook_text and "dist" in hook_text
+        assert 'mypy --exclude "$MYPY_EXCLUDE_REGEX" .' in hook_text
+        # (c) 사용자에게 보이는 skip 메시지가 도구별로 존재
+        assert "ruff not installed; skipping" in hook_text
+        assert "mypy not installed; skipping" in hook_text
+        assert "pytest not installed; skipping" in hook_text
+        assert "no Python files found; skipping mypy" in hook_text
+        # CLAUDE_HOOK_SKIP 우회 경로도 보존
+        assert "CLAUDE_HOOK_SKIP" in hook_text
+
+        # 실행 가능한 bash 가 있으면 -n 으로 문법 검증.
+        bash = shutil.which("bash")
+        if bash is not None:
+            proc = subprocess.run(
+                [bash, "-n", str(hook_path)],
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, (
+                f"hook 스크립트 bash 구문 오류:\n{proc.stderr}"
+            )
+
+    def test_claude_settings_template_omits_broad_pip_install(
+        self, tmp_path: Path
+    ) -> None:
+        """settings.json allow 목록은 좁힌 pip 패턴만 허용하고 와일드카드는 금지한다."""
+        import json as _json
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="권한 좁히기 회귀 보호",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        initializer.run()
+
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        loaded = _json.loads(settings_path.read_text(encoding="utf-8"))
+        allow: list[str] = loaded["permissions"]["allow"]
+
+        # 광범위 pip install 와일드카드는 절대 들어가면 안 된다.
+        assert "Bash(pip install *)" not in allow
+        assert "Bash(pip3 install *)" not in allow
+
+        # 좁힌 패턴은 모두 존재해야 한다.
+        expected_subset = {
+            "Bash(pip install -e .)",
+            'Bash(pip install -e ".[dev]")',
+            "Bash(pip3 install -e .)",
+            'Bash(pip3 install -e ".[dev]")',
+            "Bash(pip install --upgrade pip)",
+            "Bash(pip3 install --upgrade pip)",
+        }
+        missing = expected_subset - set(allow)
+        assert not missing, f"누락된 allow 패턴: {missing}"
+
+    def test_claude_settings_template_narrows_gh_subcommands(
+        self, tmp_path: Path
+    ) -> None:
+        """settings.json allow 목록의 gh 패턴이 destructive 서브명령(merge/close/edit) 와
+        임의 `gh api` 호출을 포함하지 않아야 한다.
+        """
+        import json as _json
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="gh 권한 좁히기 회귀 보호",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        initializer.run()
+
+        settings_path = tmp_path / relative_path_for(TargetKind.CLAUDE_CONFIG)
+        loaded = _json.loads(settings_path.read_text(encoding="utf-8"))
+        allow: list[str] = loaded["permissions"]["allow"]
+
+        # 광범위 와일드카드는 절대 들어가면 안 된다.
+        assert "Bash(gh pr *)" not in allow, (
+            "gh pr 와일드카드는 destructive 머지·close·edit까지 허용하므로 금지."
+        )
+        assert "Bash(gh api *)" not in allow, (
+            "gh api 와일드카드는 임의 GitHub REST/GraphQL 호출을 허용하므로 금지."
+        )
+        assert "Bash(gh api repos/*)" not in allow, (
+            "gh api repos/*도 -X DELETE/PATCH 등으로 쓰기 요청이 가능하므로 "
+            "팀 공유 allow에서는 금지."
+        )
+
+        # 안전한 read·write 패턴만 명시적으로 허용.
+        expected_subset = {
+            "Bash(gh pr view *)",
+            "Bash(gh pr list *)",
+            "Bash(gh pr diff *)",
+            "Bash(gh pr status *)",
+            "Bash(gh pr checks *)",
+            "Bash(gh pr comment *)",
+            "Bash(gh pr create *)",
+        }
+        missing = expected_subset - set(allow)
+        assert not missing, f"누락된 gh allow 패턴: {missing}"
+
+        # destructive 서브명령은 어떤 형태로도 명시 허용되면 안 된다.
+        for forbidden in ("gh pr merge", "gh pr close", "gh pr reopen", "gh pr edit"):
+            for entry in allow:
+                assert forbidden not in entry, (
+                    f"destructive gh 서브명령이 allow에 포함됨: {entry}"
+                )
+
+    def test_post_session_checks_pytest_exit_5_is_success(
+        self, tmp_path: Path
+    ) -> None:
+        """Stop 훅이 pytest exit 5 (no tests collected)를 성공으로 간주해야 한다.
+
+        fresh 프로젝트에서 `tests/` 디렉터리만 만들어진 직후 흔히 발생하는 상황을 대비한
+        회귀 보호 테스트.
+        """
+        import shutil
+        import subprocess
+
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="pytest exit 5 가드 회귀 보호",
+            offline=True,
+            targets=[TargetKind.CLAUDE_CONFIG],
+        )
+        initializer.run()
+
+        hook_path = tmp_path / ".claude/hooks/post_session_checks.sh"
+        hook_text = hook_path.read_text(encoding="utf-8")
+
+        # 가드 의도가 본문에 드러나야 한다.
+        assert "pytest collected no tests" in hook_text
+        assert 'pytest_status' in hook_text
+
+        # 실제 bash 가 있으면 fake pytest(exit 5) 와 함께 실행해 봄.
+        bash = shutil.which("bash")
+        if bash is None:
+            return
+
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        fake_pytest = fake_bin / "pytest"
+        fake_pytest.write_text("#!/usr/bin/env bash\nexit 5\n", encoding="utf-8")
+        fake_pytest.chmod(0o755)
+
+        # check_structure.py·ruff·mypy 는 모두 미설치·미존재 경로로 건너뛰게 한다.
+        (tmp_path / "tests").mkdir()
+
+        env = {
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "CLAUDE_PROJECT_DIR": str(tmp_path),
+            "HOME": str(tmp_path),
+        }
+        proc = subprocess.run(
+            [bash, str(hook_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert proc.returncode == 0, (
+            f"pytest exit 5는 성공 처리되어야 함. stdout=\n{proc.stdout}\n"
+            f"stderr=\n{proc.stderr}"
+        )
+        assert "pytest collected no tests" in proc.stdout
 
 
 class TestValidateMarkdown:

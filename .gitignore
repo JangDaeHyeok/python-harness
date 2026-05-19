@@ -76,3 +76,6 @@ htmlcov/
 
 # Harness runtime artifacts
 .harness/
+
+# Claude Code local overrides (per-user, not committed)
+.claude/settings.local.json
