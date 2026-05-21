@@ -66,7 +66,13 @@ class LinterSensor:
             )
             return self._parse_ruff_json(result.stdout)
         except FileNotFoundError:
-            return LintResult(True, 0, 0, [], "Ruff가 설치되어 있지 않습니다.")
+            return LintResult(
+                False,
+                1,
+                0,
+                [],
+                "[ENV] ruff이(가) 설치되어 있지 않습니다. pip install ruff 후 다시 시도하세요.",
+            )
         except subprocess.TimeoutExpired:
             return LintResult(False, 0, 0, [], "Ruff 실행 타임아웃 (60초)")
 
@@ -106,13 +112,18 @@ class LinterSensor:
         all_issues = ruff_result.issues + custom_result.issues
         total_errors = ruff_result.total_errors + custom_result.total_errors
         total_warnings = ruff_result.total_warnings + custom_result.total_warnings
+        summary = self._build_summary(all_issues)
+        if not ruff_result.passed and not ruff_result.issues:
+            summary = ruff_result.summary_for_llm
+            if custom_result.issues:
+                summary = f"{summary}\n\n{self._build_summary(custom_result.issues)}"
 
         return LintResult(
             passed=ruff_result.passed and custom_result.passed,
             total_errors=total_errors,
             total_warnings=total_warnings,
             issues=all_issues,
-            summary_for_llm=self._build_summary(all_issues),
+            summary_for_llm=summary,
         )
 
     def _check_forbidden_import(

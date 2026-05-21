@@ -7,10 +7,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from scripts import run_harness
 
 if TYPE_CHECKING:
-    import pytest
+    from collections.abc import Iterator
+
+
+@pytest.fixture(autouse=True)
+def _disable_structure_gate() -> Iterator[None]:
+    with patch("scripts.run_harness.enforce_structure_gate"):
+        yield
 
 
 def test_main_passes_worktree_options_to_config(tmp_path: Path) -> None:
@@ -153,6 +161,12 @@ def test_main_default_mode_is_create(tmp_path: Path) -> None:
 
     config = mock_orchestrator_cls.call_args.args[0]
     assert config.mode == "create"
+
+
+def test_structure_gate_policy_only_enforces_existing_project_runs() -> None:
+    assert run_harness.should_enforce_structure_gate("create", "") is False
+    assert run_harness.should_enforce_structure_gate("modify", "") is True
+    assert run_harness.should_enforce_structure_gate("create", "latest") is True
 
 
 def test_modify_mode_defaults_to_current_dir(tmp_path: Path) -> None:

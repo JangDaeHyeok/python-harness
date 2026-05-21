@@ -75,7 +75,8 @@ htmlcov/
 # .python-version
 
 # Harness runtime artifacts
-.harness/
+.harness/*
+!.harness/project-policy.yaml
 
 # Claude Code local overrides (per-user, not committed)
 .claude/settings.local.json

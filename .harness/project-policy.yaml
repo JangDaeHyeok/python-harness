@@ -1,0 +1,24 @@
+project:
+  name: python-harness
+  package: harness
+  language: python
+  python_version: 3.11+
+policies:
+  review_language: ko
+  required_checks:
+    - ruff
+    - mypy
+    - pytest
+    - structure
+  conventions:
+    source: docs/code-convention.yaml
+  adr:
+    directory: docs/adr/
+    external_sources: []
+  structure:
+    source: harness_structure.yaml
+  artifacts:
+    design_intent: true
+    code_quality_guide: true
+    review_comments: true
+    pr_body: true

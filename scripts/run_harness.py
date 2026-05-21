@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.agents.orchestrator import HarnessConfig, HarnessOrchestrator
+from harness.context.structure_gate import check_structure, format_structure_violation
 from harness.tools.api_client import ENDPOINT_ENV_VAR
 
 
@@ -67,6 +68,20 @@ def setup_logging(verbose: bool = False) -> None:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+
+
+def enforce_structure_gate(project_dir: Path) -> None:
+    """하네스 실행 전 고정 구조를 강제한다."""
+    report = check_structure(project_dir)
+    if report.ok:
+        return
+    print(format_structure_violation(report), file=sys.stderr)
+    sys.exit(1)
+
+
+def should_enforce_structure_gate(mode: str, resume_run_id: str) -> bool:
+    """기존 프로젝트를 다루는 실행에서만 고정 구조를 강제한다."""
+    return mode == "modify" or bool(resume_run_id)
 
 
 def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
@@ -204,10 +219,13 @@ def main() -> None:
         require_docs_diff_for_headless=not args.allow_empty_docs_diff,
     )
 
-    orchestrator = HarnessOrchestrator(config)
-
     if not resume_run_id and not args.prompt:
         parser.error("prompt가 필요합니다. 중단된 실행을 재개하려면 --resume 또는 --run-id를 사용하세요.")
+
+    if should_enforce_structure_gate(mode, resume_run_id):
+        enforce_structure_gate(project_dir)
+
+    orchestrator = HarnessOrchestrator(config)
 
     try:
         summary = orchestrator.run(args.prompt, resume_run_id=resume_run_id)

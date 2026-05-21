@@ -31,6 +31,7 @@ description: Produce the 20-line-or-less handoff summary that each headless Phas
 - 다음 Phase 입력에 영향을 주는 결정 한 줄.
 
 ## 검증 결과
+- 결정적 파이프라인 결과: pass | fail | skipped(이유)
 - ruff: pass | <짧은 사유로 fail>
 - mypy: pass | <짧은 사유로 fail>
 - pytest: pass | skipped(이유) | fail(테스트명)

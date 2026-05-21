@@ -2,7 +2,7 @@
 
 LLM 호출이 불가하거나 실패했을 때 폴백으로 사용된다.
 모든 템플릿은 단순 문자열 포맷팅(``str.format``)으로 ``project_name`` /
-``intent_summary`` 만을 치환한다. 추가 변수는 ``str.format_map``으로 다룬다.
+``intent_summary`` / ``package`` 등을 치환한다. 추가 변수는 ``str.format_map``으로 다룬다.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ class TemplateContext:
 
     project_name: str
     intent_summary: str
+    package: str = "harness"
+    adr_path: str = "docs/adr/0001-initial-architecture.md"
     language: str = "python"
     python_version: str = "3.11+"
     today: str = field(default_factory=_today_iso)
@@ -30,6 +32,8 @@ class TemplateContext:
         return {
             "project_name": self.project_name or "my-project",
             "intent_summary": self.intent_summary or "프로젝트 목적이 아직 정의되지 않았습니다.",
+            "package": self.package or "harness",
+            "adr_path": self.adr_path or "docs/adr/0001-initial-architecture.md",
             "language": self.language,
             "python_version": self.python_version,
             "today": self.today or _today_iso(),
@@ -118,9 +122,36 @@ rules:
     severity: warning
 """
 
+_MIGRATION_STRUCTURE_TEMPLATE = """\
+# {project_name} 구조 규칙
+# 기존 Python 프로젝트를 Python Harness 강제 구조에 맞추기 위한 규칙이다.
+
+rules:
+  - name: required_harness_files
+    type: required_files
+    files:
+      - harness_structure.yaml
+      - .harness/project-policy.yaml
+      - {adr_path}
+      - docs/code-convention.yaml
+      - tests
+      - scripts
+    description: "하네스 운영에 필요한 필수 파일과 디렉터리가 존재해야 한다"
+
+  - name: no_print_debug
+    type: forbidden_pattern
+    pattern: '^\\s*print\\('
+    directories:
+      - {package}
+    message: "print() 대신 logging을 사용하세요"
+    severity: warning
+"""
+
 _POLICY_TEMPLATE = """\
 project:
   name: {project_name}
+  # 이 프로젝트의 메인 패키지 디렉토리명. 필수.
+  package: {package}
   language: {language}
   python_version: '{python_version}'
 policies:
@@ -313,6 +344,11 @@ def render_convention(ctx: TemplateContext) -> str:
 def render_structure(ctx: TemplateContext) -> str:
     """기본 구조 규칙 YAML을 렌더링한다."""
     return _STRUCTURE_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_migration_structure(ctx: TemplateContext) -> str:
+    """기존 외부 Python 프로젝트용 구조 규칙 YAML을 렌더링한다."""
+    return _MIGRATION_STRUCTURE_TEMPLATE.format_map(ctx.as_mapping())
 
 
 def render_policy(ctx: TemplateContext) -> str:

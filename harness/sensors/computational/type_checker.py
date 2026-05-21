@@ -45,7 +45,12 @@ class TypeCheckerSensor:
                 timeout=120,
             )
         except FileNotFoundError:
-            return TypeCheckResult(True, 0, [], "mypy가 설치되어 있지 않습니다.")
+            return TypeCheckResult(
+                False,
+                1,
+                [],
+                "[ENV] mypy이(가) 설치되어 있지 않습니다. pip install mypy 후 다시 시도하세요.",
+            )
         except subprocess.TimeoutExpired:
             return TypeCheckResult(False, 0, [], "mypy 실행 타임아웃 (120초)")
 

@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from harness.context.structure_gate import check_structure, format_structure_violation
 from harness.review.artifacts import ReviewArtifactManager
 from harness.review.pr_body import PRBodyGenerator
 
@@ -458,6 +459,15 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
+def enforce_structure_gate(project_dir: Path) -> None:
+    """PR 파이프라인 시작 전 고정 구조를 강제한다."""
+    report = check_structure(project_dir)
+    if report.ok:
+        return
+    print(format_structure_violation(report), file=sys.stderr)
+    sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="PR 자동화 파이프라인")
     parser.add_argument("--base", default="main", help="베이스 브랜치")
@@ -472,6 +482,7 @@ def main() -> None:
     setup_logging(args.verbose)
 
     project_dir = Path(args.project_dir).resolve()
+    enforce_structure_gate(project_dir)
     result = run_pipeline(
         project_dir,
         args.base,

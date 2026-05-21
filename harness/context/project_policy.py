@@ -25,6 +25,7 @@ class ProjectPolicy:
     """프로젝트 정책 데이터."""
 
     project_name: str = ""
+    package: str = "harness"
     language: str = ""
     python_version: str = ""
     review_language: str = "ko"
@@ -48,6 +49,7 @@ class ProjectPolicy:
         data: dict[str, Any] = {
             "project": {
                 "name": self.project_name,
+                "package": self.package,
                 "language": self.language,
             },
             "policies": {
@@ -76,6 +78,7 @@ class ProjectPolicy:
 
         return cls(
             project_name=str(project.get("name", "")),
+            package=str(project.get("package") or "harness"),
             language=str(project.get("language", "")),
             python_version=str(project.get("python_version", "")),
             review_language=str(policies.get("review_language", "ko")),
@@ -138,12 +141,18 @@ class ProjectPolicyManager:
         logger.info("프로젝트 정책 저장 완료: %s", self._policy_path)
         return self._policy_path
 
-    def init_default(self, project_name: str = "", language: str = "python") -> ProjectPolicy:
+    def init_default(
+        self,
+        project_name: str = "",
+        language: str = "python",
+        package: str = "harness",
+    ) -> ProjectPolicy:
         """기본 정책 파일을 생성한다. 이미 존재하면 기존 정책을 반환한다."""
         if self.exists():
             return self.load()
         policy = ProjectPolicy(
             project_name=project_name,
+            package=package,
             language=language,
             python_version="3.11+",
         )

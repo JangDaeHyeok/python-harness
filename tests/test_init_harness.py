@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from harness.bootstrap.initializer import ALL_TARGETS, TargetKind, relative_path_for
 from scripts import init_harness
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_main_creates_files_with_offline_mode(tmp_path: Path) -> None:
@@ -179,3 +176,26 @@ def test_main_constructs_client_when_endpoint_provided(
     mock_cls.assert_called_once()
     fake_client.create_message.assert_called_once()
     assert (project_dir / relative_path_for(TargetKind.ADR)).exists()
+
+
+def test_main_migrate_dry_run_current_repo_reports_no_changes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "init_harness.py",
+            "--project-dir",
+            str(repo_root),
+            "--offline",
+            "--migrate",
+            "--dry-run",
+        ],
+    ):
+        init_harness.main()
+
+    captured = capsys.readouterr()
+    assert "변경 사항 없음" in captured.out
+    assert "[MIGRATE] 완료. 다음 단계:" in captured.out

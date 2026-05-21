@@ -13,6 +13,7 @@ import yaml
 from harness.bootstrap import (
     BootstrapInitializer,
     TargetKind,
+    derive_package_name,
     derive_project_name,
 )
 from harness.bootstrap.initializer import (
@@ -133,8 +134,14 @@ class TestTemplates:
         ctx = TemplateContext(project_name="my-svc", intent_summary="y", language="python")
         loaded = yaml.safe_load(render_policy(ctx))
         assert loaded["project"]["name"] == "my-svc"
+        assert loaded["project"]["package"] == "harness"
         assert "required_checks" in loaded["policies"]
         assert "ruff" in loaded["policies"]["required_checks"]
+
+    def test_render_policy_yaml_includes_package(self) -> None:
+        ctx = TemplateContext(project_name="my-svc", package="my_svc", intent_summary="y")
+        loaded = yaml.safe_load(render_policy(ctx))
+        assert loaded["project"]["package"] == "my_svc"
 
 
 class TestDeriveProjectName:
@@ -155,6 +162,14 @@ class TestDeriveProjectName:
         assert derive_project_name("", Path(".")) != ""
 
 
+class TestDerivePackageName:
+    def test_hyphenated_project_name(self) -> None:
+        assert derive_package_name("billing-api") == "billing_api"
+
+    def test_digit_prefix(self) -> None:
+        assert derive_package_name("2026-api") == "pkg_2026_api"
+
+
 class TestBootstrapInitializerOffline:
     def test_creates_all_targets_when_missing(self, tmp_path: Path) -> None:
         initializer = BootstrapInitializer(
@@ -170,6 +185,11 @@ class TestBootstrapInitializerOffline:
         for kind in ALL_TARGETS:
             assert (tmp_path / relative_path_for(kind)).exists()
         assert (tmp_path / ".claude/hooks/post_session_checks.sh").exists()
+
+        loaded = yaml.safe_load(
+            (tmp_path / relative_path_for(TargetKind.POLICY)).read_text(encoding="utf-8")
+        )
+        assert loaded["project"]["package"] == tmp_path.name.replace("-", "_")
 
     def test_skips_existing_files_without_force(self, tmp_path: Path) -> None:
         target = tmp_path / relative_path_for(TargetKind.POLICY)
@@ -684,21 +704,25 @@ class TestValidateStructureYaml:
 
 class TestValidatePolicyYaml:
     def test_accepts_valid_policy(self) -> None:
-        text = "project:\n  name: x\npolicies:\n  required_checks: [ruff]\n"
+        text = "project:\n  name: x\n  package: x\npolicies:\n  required_checks: [ruff]\n"
         assert _validate_policy_yaml(text) is True
 
     def test_rejects_missing_project(self) -> None:
         assert _validate_policy_yaml("policies:\n  required_checks: []\n") is False
 
+    def test_rejects_missing_package(self) -> None:
+        text = "project:\n  name: x\npolicies:\n  required_checks: [ruff]\n"
+        assert _validate_policy_yaml(text) is False
+
     def test_rejects_missing_policies(self) -> None:
-        assert _validate_policy_yaml("project:\n  name: x\n") is False
+        assert _validate_policy_yaml("project:\n  name: x\n  package: x\n") is False
 
     def test_rejects_non_dict_project(self) -> None:
         text = "project: not-a-dict\npolicies:\n  x: y\n"
         assert _validate_policy_yaml(text) is False
 
     def test_rejects_non_dict_policies(self) -> None:
-        text = "project:\n  name: x\npolicies: not-a-dict\n"
+        text = "project:\n  name: x\n  package: x\npolicies: not-a-dict\n"
         assert _validate_policy_yaml(text) is False
 
 
@@ -789,7 +813,7 @@ class TestBootstrapInitializerLLM:
     def test_llm_strips_code_fence(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.create_message.return_value = self._make_response(
-            "```yaml\nproject:\n  name: fenced\npolicies:\n  required_checks: [ruff]\n```"
+            "```yaml\nproject:\n  name: fenced\n  package: fenced\npolicies:\n  required_checks: [ruff]\n```"
         )
 
         initializer = BootstrapInitializer(

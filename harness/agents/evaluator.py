@@ -6,13 +6,16 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
 from harness.guides import GuideRegistry
 from harness.guides.prompts import EVALUATOR_SYSTEM_PROMPT
 from harness.tools.api_client import DEFAULT_MODEL
 from harness.tools.shell import run_command_safe, validate_path
+
+if TYPE_CHECKING:
+    from harness.pipeline.harness_pipeline import PipelineReport
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +202,7 @@ class EvaluatorAgent(BaseAgent):
         sprint_contract: str,
         app_url: str = "http://localhost:3000",
         criteria_md: str | None = None,
+        pipeline_report: PipelineReport | None = None,
     ) -> EvaluationResult:
         """스프린트 결과물을 평가한다.
 
@@ -207,15 +211,26 @@ class EvaluatorAgent(BaseAgent):
             sprint_contract: 스프린트 계약 (검증 기준)
             app_url: 테스트 대상 앱 URL
             criteria_md: 추가 평가 기준 마크다운 (CriteriaGenerator 출력)
+            pipeline_report: 평가 직전에 실행한 결정적 파이프라인 결과
         """
         criteria_section = ""
         if criteria_md:
             criteria_section = f"\n### 프로젝트 평가 기준\n{criteria_md}\n"
 
+        deterministic_section = ""
+        if pipeline_report is not None:
+            deterministic_section = (
+                "\n### 결정적 결과\n"
+                "다음 결정적 결과를 기준으로 평가하라. "
+                "LLM이 결과를 임의로 뒤집을 수 없음.\n"
+                f"{pipeline_report.summary_for_llm}\n"
+            )
+
         message = (
             f"## 스프린트 {sprint_number} 평가\n\n"
             f"### 스프린트 계약 (검증 기준)\n{sprint_contract}\n\n"
             f"{criteria_section}"
+            f"{deterministic_section}"
             f"### 테스트 대상 앱\n앱이 {app_url}에서 실행 중입니다.\n\n"
             "다음 절차로 평가해주세요:\n"
             "1. `check_url`로 앱 접근 가능한지 확인\n"
@@ -227,7 +242,59 @@ class EvaluatorAgent(BaseAgent):
         result = self.run(message)
         if not isinstance(result, EvaluationResult):
             raise TypeError(f"EvaluationResult 예상, {type(result).__name__} 반환됨")
-        return result
+        return self._apply_pipeline_report(result, sprint_number, pipeline_report)
+
+    def _apply_pipeline_report(
+        self,
+        result: EvaluationResult,
+        sprint_number: int,
+        pipeline_report: PipelineReport | None,
+    ) -> EvaluationResult:
+        """결정적 파이프라인 결과를 LLM 평가 위에 강제 적용한다."""
+        if pipeline_report is None:
+            return result
+
+        failed_checks = [
+            name
+            for name, passed in pipeline_report.details.items()
+            if name.endswith("_passed") and passed is False
+        ]
+        deterministic_passed = pipeline_report.passed
+        passed = result.passed and deterministic_passed
+
+        deterministic_summary = "pass" if deterministic_passed else "fail"
+        if failed_checks:
+            deterministic_summary = f"fail ({', '.join(failed_checks)})"
+
+        detailed_feedback = (
+            "## 결정적 결과:\n"
+            f"{pipeline_report.summary_for_llm}\n\n"
+            "## LLM 평가:\n"
+            f"{result.detailed_feedback or result.summary}"
+        )
+        summary = (
+            f"결정적 결과: {deterministic_summary}\n"
+            f"LLM 평가: {'pass' if result.passed else 'fail'} - {result.summary}"
+        )
+
+        bugs = list(result.bugs_found)
+        if not deterministic_passed:
+            bugs.append({
+                "severity": "critical",
+                "description": "결정적 파이프라인 실패로 스프린트가 실패 처리되었습니다.",
+                "location": "HarnessPipeline.run_all",
+                "fix_suggestion": "결정적 결과 섹션의 실패 항목을 수정한 뒤 다시 평가하세요.",
+            })
+
+        return EvaluationResult(
+            sprint_number=result.sprint_number or sprint_number,
+            passed=passed,
+            overall_score=result.overall_score if passed else min(result.overall_score, 5.9),
+            criteria_scores=result.criteria_scores,
+            bugs_found=bugs,
+            summary=summary,
+            detailed_feedback=detailed_feedback,
+        )
 
     def negotiate_contract(
         self, spec_json: str, sprint_number: int, generator_proposal: str

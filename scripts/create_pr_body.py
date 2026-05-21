@@ -15,6 +15,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from harness.context.structure_gate import check_structure, format_structure_violation
+
 
 def _generate_body(project_dir: Path, base: str, summary: str, branch: str | None) -> str:
     """PR 본문을 생성하고 반환한다. worktree/직접 실행 모두에서 호출된다."""
@@ -68,6 +70,8 @@ def main() -> None:
         print(f"오류: 프로젝트 디렉터리를 찾을 수 없음 - {project_dir}", file=sys.stderr)
         sys.exit(1)
 
+    enforce_structure_gate(project_dir)
+
     if args.use_worktree:
         body = _run_in_worktree(project_dir, args.base, args.summary, args.branch)
     else:
@@ -79,6 +83,15 @@ def main() -> None:
         print(f"PR 본문 저장 완료: {output_path}")
     else:
         print(body)
+
+
+def enforce_structure_gate(project_dir: Path) -> None:
+    """PR 본문 산출물 생성 전 고정 구조를 강제한다."""
+    report = check_structure(project_dir)
+    if report.ok:
+        return
+    print(format_structure_violation(report), file=sys.stderr)
+    sys.exit(1)
 
 
 def _run_in_worktree(

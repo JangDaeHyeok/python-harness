@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from harness.context.project_policy import ProjectPolicy, ProjectPolicyManager
 from harness.tools.file_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -128,9 +129,10 @@ _DEFAULT_PHASES = [
 class PhaseManager:
     """스프린트를 Phase 단위로 분할·관리한다."""
 
-    def __init__(self, project_dir: Path) -> None:
+    def __init__(self, project_dir: Path, policy: ProjectPolicy | None = None) -> None:
         self.project_dir = Path(project_dir)
         self._tasks_dir = self.project_dir / ".harness" / "tasks"
+        self._policy = policy or ProjectPolicyManager(self.project_dir).load()
 
     @property
     def tasks_dir(self) -> Path:
@@ -168,9 +170,9 @@ class PhaseManager:
                 depends_on=depends,
                 docs_diff_ref=f".harness/tasks/sprint-{sprint_number}/docs-diff.md",
                 inputs=self._default_inputs_for_phase(i, sprint_number),
-                allowed_files=self._default_allowed_files_for_phase(id_suffix),
+                allowed_files=self._default_allowed_files_for_phase(id_suffix, self._policy),
                 expected_outputs=self._default_expected_outputs_for_phase(id_suffix, sprint_number),
-                verification=self._default_verification_for_phase(id_suffix),
+                verification=self._default_verification_for_phase(id_suffix, self._policy),
             )
             phases.append(phase)
             prev_id = phase_id
@@ -334,6 +336,7 @@ class PhaseManager:
             f"- 작업 완료 후 `.harness/tasks/sprint-{phase.sprint_number}/{phase.phase_id}-handoff.md`에 "
             "수정 파일, 남은 이슈, 다음 Phase가 알아야 할 내용을 20줄 이내로 기록하세요."
         )
+        lines.append("- 핸드오프의 검증 결과에는 `결정적 파이프라인 결과: pass|fail|skipped(이유)` 한 줄을 포함하세요.")
         if phase.handoff_summary:
             lines.append(f"- 추가 지침: {phase.handoff_summary}")
         lines.append("")
@@ -364,14 +367,18 @@ class PhaseManager:
         return inputs
 
     @staticmethod
-    def _default_allowed_files_for_phase(id_suffix: str) -> list[str]:
+    def _default_allowed_files_for_phase(
+        id_suffix: str, policy: ProjectPolicy | None = None
+    ) -> list[str]:
+        active_policy = policy or ProjectPolicy()
+        package_glob = f"{active_policy.package}/**"
         if id_suffix == "docs-update":
             return ["docs/**", ".harness/review-artifacts/**", ".harness/tasks/**"]
         if id_suffix == "tests":
-            return ["tests/**", "harness/**", "scripts/**", "docs/**"]
+            return ["tests/**", package_glob, "scripts/**", "docs/**"]
         if id_suffix == "validation":
-            return ["harness/**", "scripts/**", "tests/**", "docs/**", ".harness/tasks/**"]
-        return ["harness/**", "scripts/**", "tests/**", "docs/**"]
+            return [package_glob, "scripts/**", "tests/**", "docs/**", ".harness/tasks/**"]
+        return [package_glob, "scripts/**", "tests/**", "docs/**"]
 
     @staticmethod
     def _default_expected_outputs_for_phase(id_suffix: str, sprint_number: int) -> list[str]:
@@ -387,9 +394,12 @@ class PhaseManager:
         return ["스프린트 계약과 docs-diff에 맞는 최소 구현 변경"]
 
     @staticmethod
-    def _default_verification_for_phase(id_suffix: str) -> str:
+    def _default_verification_for_phase(
+        id_suffix: str, policy: ProjectPolicy | None = None
+    ) -> str:
+        active_policy = policy or ProjectPolicy()
         if id_suffix == "validation":
-            return "ruff check && mypy harness && python3 scripts/check_structure.py && pytest"
+            return f"ruff check && mypy {active_policy.package} && python3 scripts/check_structure.py && pytest"
         if id_suffix == "tests":
             return "pytest"
         return "변경 범위에 맞는 관련 테스트를 실행하세요."

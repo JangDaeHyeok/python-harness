@@ -153,6 +153,11 @@ class PRBodyGenerator:
         lines.append("- [ ] 구조 분석 통과 (`python scripts/check_structure.py`)")
         lines.append("")
 
+        # ADR Rationale
+        lines.append("## ADR Rationale\n")
+        lines.append("- ADR-0010: 외부 프로젝트의 고정 구조를 강제해 센서 실패를 명확한 환경 오류로 드러낸다.")
+        lines.append("")
+
         # Related Artifacts
         lines.append("## Related Artifacts\n")
         artifact_list = artifact_manager.list_artifacts()

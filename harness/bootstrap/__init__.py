@@ -4,7 +4,9 @@ from harness.bootstrap.initializer import (
     BootstrapInitializer,
     BootstrapPlan,
     BootstrapResult,
+    MigrationOptions,
     TargetKind,
+    derive_package_name,
     derive_project_name,
 )
 
@@ -12,6 +14,8 @@ __all__ = [
     "BootstrapInitializer",
     "BootstrapPlan",
     "BootstrapResult",
+    "MigrationOptions",
     "TargetKind",
+    "derive_package_name",
     "derive_project_name",
 ]

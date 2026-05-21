@@ -27,6 +27,7 @@ from harness.context.project_policy import ProjectPolicyManager
 from harness.contracts.models import SprintContract
 from harness.contracts.store import ContractStore
 from harness.guides.context_filter import ContextFilter
+from harness.pipeline.harness_pipeline import HarnessPipeline, PipelineReport
 from harness.review.artifacts import ReviewArtifactManager
 from harness.review.criteria import CriteriaGenerator
 from harness.review.docs_diff import DocsDiffGenerator
@@ -117,6 +118,7 @@ class HarnessOrchestrator:
         self._docs_diff_gen = DocsDiffGenerator(self.project_dir)
         self._context_filter = ContextFilter(self.project_dir)
         self._session_fork_mgr = SessionForkManager(self.project_dir)
+        self._pipeline = HarnessPipeline(str(self.project_dir))
 
     def run(
         self, user_prompt: str, *, resume_run_id: str = ""
@@ -420,12 +422,18 @@ class HarnessOrchestrator:
             self._checkpoint_store.save(session)
 
             logger.info("  [Sprint %d] 평가 중...", sprint_num)
+            pipeline_report = self._run_deterministic_pipeline(sprint_num, attempt)
             eval_result = self.evaluator.evaluate_sprint(
-                sprint_num, contract, self.config.app_url, criteria_md=criteria_md
+                sprint_num,
+                contract,
+                self.config.app_url,
+                criteria_md=criteria_md,
+                pipeline_report=pipeline_report,
             )
             self._save_artifact(
                 f"sprint_{sprint_num}_eval_attempt{attempt}.json",
                 {
+                    "deterministic_passed": pipeline_report.passed,
                     "passed": eval_result.passed,
                     "score": eval_result.overall_score,
                     "bugs": eval_result.bugs_found,
@@ -513,6 +521,21 @@ class HarnessOrchestrator:
             lines.append(f"- `{phase_id}`: {status}")
 
         return "\n".join(lines)
+
+    def _run_deterministic_pipeline(self, sprint_num: int, attempt: int) -> PipelineReport:
+        """Evaluator 호출 직전에 결정적 파이프라인을 실행한다."""
+        logger.info("  [Sprint %d] 결정적 파이프라인 실행 중...", sprint_num)
+        report = self._pipeline.run_all()
+        self._save_artifact(
+            f"sprint_{sprint_num}_pipeline_attempt{attempt}.md",
+            report.summary_for_llm,
+        )
+        logger.info(
+            "  [Sprint %d] 결정적 파이프라인 %s",
+            sprint_num,
+            "통과" if report.passed else "실패",
+        )
+        return report
 
     def _get_or_create_sprint_state(self, sprint_num: int) -> SprintState:
         session = self._require_session()

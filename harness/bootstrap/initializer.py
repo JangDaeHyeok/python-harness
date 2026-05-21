@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+import tomllib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -31,6 +32,7 @@ from harness.bootstrap.templates import (
     render_claude_md,
     render_claude_settings,
     render_convention,
+    render_migration_structure,
     render_policy,
     render_post_session_checks,
     render_structure,
@@ -108,6 +110,7 @@ class BootstrapResult:
     project_dir: Path
     plans: list[BootstrapPlan] = field(default_factory=list)
     dry_run: bool = False
+    messages: list[str] = field(default_factory=list)
 
     def summary_lines(self) -> list[str]:
         lines: list[str] = []
@@ -132,7 +135,43 @@ class BootstrapResult:
         return sum(1 for p in self.plans if p.status == "skipped")
 
 
+@dataclass(frozen=True)
+class MigrationOptions:
+    """기존 프로젝트 마이그레이션 옵션."""
+
+    package: str | None = None
+
+
 _NAME_FALLBACK = "my-project"
+_MIGRATION_TARGETS: tuple[TargetKind, ...] = (
+    TargetKind.ADR,
+    TargetKind.CONVENTION,
+    TargetKind.STRUCTURE,
+    TargetKind.POLICY,
+)
+_MIGRATION_REQUIRED_DIRS: tuple[Path, ...] = (
+    Path("docs"),
+    Path("docs/adr"),
+    Path(".harness"),
+    Path("tests"),
+    Path("scripts"),
+)
+_PACKAGE_EXCLUDE_DIRS: frozenset[str] = frozenset({
+    ".claude",
+    ".git",
+    ".harness",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "docs",
+    "scripts",
+    "src",
+    "tests",
+})
 
 
 def derive_project_name(prompt: str, project_dir: Path) -> str:
@@ -145,6 +184,16 @@ def derive_project_name(prompt: str, project_dir: Path) -> str:
         if cleaned:
             return cleaned
     return _NAME_FALLBACK
+
+
+def derive_package_name(project_name: str) -> str:
+    """프로젝트 이름에서 Python 패키지 디렉터리명을 추정한다."""
+    normalized = re.sub(r"\W+", "_", project_name.strip().lower()).strip("_")
+    if not normalized:
+        return "harness"
+    if normalized[0].isdigit():
+        normalized = f"pkg_{normalized}"
+    return normalized
 
 
 def _summarize_intent(prompt: str) -> str:
@@ -218,9 +267,13 @@ def _validate_policy_yaml(text: str) -> bool:
         return False
     if not isinstance(loaded, dict):
         return False
-    return isinstance(loaded.get("project"), dict) and isinstance(
-        loaded.get("policies"), dict
-    )
+    project = loaded.get("project")
+    if not isinstance(project, dict):
+        return False
+    package = project.get("package")
+    if not isinstance(package, str) or not package.strip():
+        return False
+    return isinstance(loaded.get("policies"), dict)
 
 
 def _validate_markdown(text: str) -> bool:
@@ -265,8 +318,9 @@ _LLM_INSTRUCTIONS: dict[TargetKind, str] = {
         "dependency_direction 중 하나여야 합니다."
     ),
     TargetKind.POLICY: (
-        "다음은 .harness/project-policy.yaml 초안입니다. 사용자의 의도에 맞춰 project.name, language, "
-        "policies.required_checks, policies.custom_rules 등을 보강하세요. 최상위 키는 'project'와 'policies'입니다."
+        "다음은 .harness/project-policy.yaml 초안입니다. 사용자의 의도에 맞춰 project.name, "
+        "project.package, language, policies.required_checks, policies.custom_rules 등을 보강하세요. "
+        "최상위 키는 'project'와 'policies'입니다. project.package는 메인 Python 패키지 디렉터리명입니다."
     ),
     TargetKind.CLAUDE: (
         "다음은 CLAUDE.md 초안입니다. 사용자의 의도와 운영 원칙, 품질 기준, 자주 쓰는 명령을 한국어로 정리해 보강하세요."
@@ -303,19 +357,71 @@ class BootstrapInitializer:
         result = BootstrapResult(project_dir=self.project_dir, dry_run=self.dry_run)
 
         ctx = self._build_template_context()
+        self._apply_plans(result, ctx, self.targets)
+
+        return result
+
+    def migrate_existing(self, options: MigrationOptions | None = None) -> BootstrapResult:
+        """기존 Python 프로젝트를 하네스 강제 구조에 맞게 보강한다."""
+        migrate_options = options or MigrationOptions()
+        policy_package = self._read_policy_package()
+        candidates = self._detect_package_candidates()
+        package = self._resolve_migration_package(
+            candidates,
+            migrate_options.package or policy_package,
+        )
+
+        result = BootstrapResult(project_dir=self.project_dir, dry_run=self.dry_run)
+        result.messages.append(f"[MIGRATE] 패키지 자동 채택: {package}")
+
+        if not self.dry_run:
+            self._ensure_migration_dirs()
+
+        path_overrides = self._migration_path_overrides()
+        adr_path = path_overrides.get(TargetKind.ADR, _RELATIVE_PATHS[TargetKind.ADR])
+        ctx = self._build_template_context(package=package, adr_path=str(adr_path))
+        content_overrides = self._migration_content_overrides(package, ctx)
+        self._apply_plans(
+            result,
+            ctx,
+            [kind for kind in self.targets if kind in _MIGRATION_TARGETS],
+            structure_renderer=render_migration_structure,
+            path_overrides=path_overrides,
+            content_overrides=content_overrides,
+        )
+
+        if not (self.project_dir / ".claude/skills").exists():
+            result.messages.append(
+                "[MIGRATE] Claude Code를 쓰면 .claude/skills 복사를 고려하세요."
+            )
+        return result
+
+    def _apply_plans(
+        self,
+        result: BootstrapResult,
+        ctx: TemplateContext,
+        targets: list[TargetKind],
+        *,
+        structure_renderer: Callable[[TemplateContext], str] = render_structure,
+        path_overrides: dict[TargetKind, Path] | None = None,
+        content_overrides: dict[TargetKind, str] | None = None,
+    ) -> None:
+        """대상 목록에 대한 파일 쓰기 계획을 만들고 필요 시 실행한다."""
+        paths = path_overrides or {}
+        overrides = content_overrides or {}
         renderers: dict[TargetKind, Callable[[TemplateContext], str]] = {
             TargetKind.ADR: render_adr,
             TargetKind.CONVENTION: render_convention,
-            TargetKind.STRUCTURE: render_structure,
+            TargetKind.STRUCTURE: structure_renderer,
             TargetKind.POLICY: render_policy,
             TargetKind.CLAUDE: render_claude_md,
             TargetKind.CLAUDE_CONFIG: render_claude_settings,
         }
 
-        for kind in self.targets:
-            target_path = self.project_dir / _RELATIVE_PATHS[kind]
+        for kind in targets:
+            target_path = self.project_dir / paths.get(kind, _RELATIVE_PATHS[kind])
             existed = target_path.exists()
-            if existed and not self.force:
+            if existed and not self.force and kind not in overrides:
                 if kind is TargetKind.CLAUDE_CONFIG:
                     self._append_missing_claude_hook_plan(result, ctx)
                 plan = BootstrapPlan(
@@ -329,8 +435,12 @@ class BootstrapInitializer:
                 result.plans.append(plan)
                 continue
 
-            template_text = renderers[kind](ctx)
-            content, source = self._maybe_customize_with_llm(kind, template_text, ctx)
+            if kind in overrides:
+                content = overrides[kind]
+                source = "template"
+            else:
+                template_text = renderers[kind](ctx)
+                content, source = self._maybe_customize_with_llm(kind, template_text, ctx)
 
             main_plan = BootstrapPlan(
                 kind=kind,
@@ -364,8 +474,6 @@ class BootstrapInitializer:
                     self._write_file(target_path, content)
                 result.plans.append(main_plan)
 
-        return result
-
     def _append_missing_claude_hook_plan(
         self, result: BootstrapResult, ctx: TemplateContext
     ) -> None:
@@ -387,10 +495,144 @@ class BootstrapInitializer:
             self._write_claude_hook_sidecar(ctx)
         result.plans.append(plan)
 
-    def _build_template_context(self) -> TemplateContext:
+    def _build_template_context(
+        self, package: str | None = None, adr_path: str | None = None
+    ) -> TemplateContext:
+        project_name = derive_project_name(self.prompt, self.project_dir)
         return TemplateContext(
-            project_name=derive_project_name(self.prompt, self.project_dir),
+            project_name=project_name,
+            package=package or derive_package_name(project_name),
+            adr_path=adr_path or str(_RELATIVE_PATHS[TargetKind.ADR]),
             intent_summary=_summarize_intent(self.prompt),
+        )
+
+    def _read_policy_package(self) -> str | None:
+        policy_path = self.project_dir / _RELATIVE_PATHS[TargetKind.POLICY]
+        if not policy_path.exists():
+            return None
+        try:
+            loaded = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            return None
+        if not isinstance(loaded, dict):
+            return None
+        direct_package = loaded.get("package")
+        if isinstance(direct_package, str) and direct_package.strip():
+            return direct_package.strip()
+        project = loaded.get("project")
+        if not isinstance(project, dict):
+            return None
+        package = project.get("package")
+        if isinstance(package, str) and package.strip():
+            return package.strip()
+        return None
+
+    def _detect_package_candidates(self) -> list[str]:
+        candidates: set[str] = set()
+        candidates.update(self._pyproject_package_candidates())
+
+        for child in self.project_dir.iterdir() if self.project_dir.exists() else []:
+            if not child.is_dir() or child.name in _PACKAGE_EXCLUDE_DIRS:
+                continue
+            if (child / "__init__.py").exists():
+                candidates.add(child.name)
+
+        return sorted(candidates)
+
+    def _pyproject_package_candidates(self) -> set[str]:
+        pyproject_path = self.project_dir / "pyproject.toml"
+        if not pyproject_path.exists():
+            return set()
+        try:
+            loaded = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError:
+            return set()
+        project = loaded.get("project")
+        if not isinstance(project, dict):
+            return set()
+        name = project.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return set()
+        package = derive_package_name(name)
+        if (self.project_dir / package / "__init__.py").exists():
+            return {package}
+        return set()
+
+    def _resolve_migration_package(
+        self, candidates: list[str], policy_package: str | None
+    ) -> str:
+        if policy_package:
+            if not (self.project_dir / policy_package / "__init__.py").exists():
+                raise ValueError(
+                    f"[MIGRATE] 정책 package가 루트 패키지가 아닙니다: {policy_package}\n"
+                    "이유: 고정 구조 게이트는 루트의 <package>/ 디렉터리를 요구합니다.\n"
+                    "조치: 루트 패키지로 옮기거나 루트 패키지명을 package에 명시하세요."
+                )
+            return policy_package
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise ValueError(
+                f"[MIGRATE] 패키지 후보가 여러 개입니다: {candidates}\n"
+                "이유: 자동으로 하나를 고르면 잘못된 패키지를 구조 규칙에 고정할 수 있습니다.\n"
+                "조치: .harness/project-policy.yaml에 package: <이름>을 명시한 후 다시 --migrate 하세요."
+            )
+        raise ValueError(
+            "[MIGRATE] 패키지 후보를 찾지 못했습니다.\n"
+            "이유: 루트 <package>/__init__.py 패키지가 없습니다. src/ 레이아웃은 "
+            "현재 하네스 고정 구조 마이그레이션 대상에서 제외합니다.\n"
+            "조치: 루트 Python 패키지를 만들거나, 루트 패키지명을 "
+            ".harness/project-policy.yaml의 package에 명시한 후 다시 --migrate 하세요."
+        )
+
+    def _ensure_migration_dirs(self) -> None:
+        for relative_dir in _MIGRATION_REQUIRED_DIRS:
+            (self.project_dir / relative_dir).mkdir(parents=True, exist_ok=True)
+
+    def _migration_path_overrides(self) -> dict[TargetKind, Path]:
+        adr_dir = self.project_dir / "docs/adr"
+        if not adr_dir.exists():
+            return {}
+        existing_adr = next(iter(sorted(adr_dir.glob("0001-*.md"))), None)
+        if existing_adr is None:
+            return {}
+        return {TargetKind.ADR: existing_adr.relative_to(self.project_dir)}
+
+    def _migration_content_overrides(
+        self, package: str, ctx: TemplateContext
+    ) -> dict[TargetKind, str]:
+        policy_path = self.project_dir / _RELATIVE_PATHS[TargetKind.POLICY]
+        if self.force or not policy_path.exists():
+            return {}
+        content = self._render_existing_policy_with_package(policy_path, package, ctx)
+        if content is None:
+            return {}
+        return {TargetKind.POLICY: content}
+
+    def _render_existing_policy_with_package(
+        self, policy_path: Path, package: str, ctx: TemplateContext
+    ) -> str | None:
+        try:
+            loaded = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            return render_policy(ctx)
+        if not isinstance(loaded, dict):
+            return render_policy(ctx)
+
+        project = loaded.get("project")
+        if not isinstance(project, dict):
+            project = {}
+            loaded["project"] = project
+        if project.get("package") == package and "package" not in loaded:
+            return None
+
+        project["package"] = package
+        loaded.pop("package", None)
+        return yaml.dump(
+            loaded,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
         )
 
     def _maybe_customize_with_llm(

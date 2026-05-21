@@ -123,6 +123,15 @@ class TestPRBodyGenerator:
         assert "## Test Plan" in result
         assert "pytest" in result
 
+    def test_generate_includes_adr_0010_rationale(self, tmp_path: Path) -> None:
+        with patch("harness.review.pr_body.get_git_diff_stat", return_value=""), \
+             patch("harness.review.pr_body.get_changed_files", return_value=[]):
+            manager = self._make_manager(tmp_path)
+            gen = PRBodyGenerator(tmp_path)
+            result = gen.generate(manager)
+        assert "## ADR Rationale" in result
+        assert "ADR-0010" in result
+
     def test_generate_includes_related_artifacts(self, tmp_path: Path) -> None:
         with patch("harness.review.pr_body.get_git_diff_stat", return_value=""), \
              patch("harness.review.pr_body.get_changed_files", return_value=[]):

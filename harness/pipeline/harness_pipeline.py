@@ -27,6 +27,9 @@ class PipelineResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+PipelineReport = PipelineResult
+
+
 class HarnessPipeline:
     """
     하네스 파이프라인.

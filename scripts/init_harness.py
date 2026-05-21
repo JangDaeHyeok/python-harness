@@ -110,6 +110,11 @@ def main() -> None:
         action="store_true",
         help="실제로 파일을 쓰지 않고 결과만 출력한다",
     )
+    parser.add_argument(
+        "--migrate",
+        action="store_true",
+        help="기존 Python 프로젝트를 하네스 강제 구조에 맞게 보강한다",
+    )
     parser.add_argument("--model", default="claude-sonnet-4-6", help="LLM 모델명")
     parser.add_argument(
         "--api-endpoint",
@@ -140,20 +145,34 @@ def main() -> None:
         dry_run=args.dry_run,
         targets=targets,
     )
-    result = initializer.run()
+    try:
+        result = initializer.migrate_existing() if args.migrate else initializer.run()
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
 
     print("=" * 60)
     print(f"프로젝트: {result.project_dir}")
-    print(f"모드: {'dry-run' if result.dry_run else '쓰기'} / "
-          f"{'offline' if (args.offline or client is None) else 'llm'}")
+    mode = "migrate" if args.migrate else "init"
+    print(
+        f"모드: {mode} / {'dry-run' if result.dry_run else '쓰기'} / "
+        f"{'offline' if (args.offline or client is None) else 'llm'}"
+    )
     print("-" * 60)
+    for line in result.messages:
+        print(line)
     for line in result.summary_lines():
         print(line)
+    if not result.created_count and not result.updated_count:
+        print("변경 사항 없음")
     print("-" * 60)
     print(
         f"생성 {result.created_count}개 / 업데이트 {result.updated_count}개 / "
         f"스킵 {result.skipped_count}개"
     )
+    if args.migrate:
+        print("[MIGRATE] 완료. 다음 단계:")
+        print("  1) docs/adr/0001-* 를 검토하세요.")
+        print("  2) harness 명령으로 첫 실행을 시도하세요.")
     print("=" * 60)
 
 

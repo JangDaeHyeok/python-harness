@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 class TestProjectPolicy:
     def test_default_values(self) -> None:
         policy = ProjectPolicy()
+        assert policy.package == "harness"
         assert policy.review_language == "ko"
         assert "ruff" in policy.required_checks
         assert "mypy" in policy.required_checks
@@ -22,16 +23,23 @@ class TestProjectPolicy:
     def test_to_yaml_and_back(self) -> None:
         policy = ProjectPolicy(
             project_name="test-project",
+            package="test_project",
             language="python",
             python_version="3.11+",
         )
         yaml_str = policy.to_yaml()
         assert "test-project" in yaml_str
+        assert "test_project" in yaml_str
         assert "python" in yaml_str
 
     def test_from_dict(self) -> None:
         data = {
-            "project": {"name": "my-proj", "language": "python", "python_version": "3.12"},
+            "project": {
+                "name": "my-proj",
+                "package": "my_proj",
+                "language": "python",
+                "python_version": "3.12",
+            },
             "policies": {
                 "review_language": "en",
                 "required_checks": ["ruff"],
@@ -44,6 +52,7 @@ class TestProjectPolicy:
         }
         policy = ProjectPolicy.from_dict(data)
         assert policy.project_name == "my-proj"
+        assert policy.package == "my_proj"
         assert policy.review_language == "en"
         assert policy.required_checks == ["ruff"]
         assert policy.conventions_source == "custom.yaml"
@@ -53,6 +62,7 @@ class TestProjectPolicy:
     def test_from_dict_with_defaults(self) -> None:
         policy = ProjectPolicy.from_dict({})
         assert policy.project_name == ""
+        assert policy.package == "harness"
         assert policy.review_language == "ko"
         assert len(policy.required_checks) == 4
         assert policy.external_adr_sources == []
@@ -93,6 +103,7 @@ class TestProjectPolicyManager:
         mgr.invalidate_cache()
         loaded = mgr.load()
         assert loaded.project_name == "saved"
+        assert loaded.package == "harness"
         assert loaded.language == "python"
         assert list(mgr.policy_path.parent.glob(".policy-*.tmp")) == []
 
@@ -111,6 +122,13 @@ class TestProjectPolicyManager:
 
         assert mgr.exists()
         assert policy.project_name == "init-test"
+        assert policy.package == "harness"
+
+    def test_init_default_accepts_package(self, tmp_path: Path) -> None:
+        mgr = ProjectPolicyManager(tmp_path)
+        policy = mgr.init_default(project_name="init-test", package="init_test")
+
+        assert policy.package == "init_test"
 
     def test_init_default_returns_existing(self, tmp_path: Path) -> None:
         mgr = ProjectPolicyManager(tmp_path)

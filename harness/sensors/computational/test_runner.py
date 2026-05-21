@@ -52,9 +52,10 @@ class TestRunnerSensor:
             )
         except FileNotFoundError:
             return TestResult(
-                passed=True, total=0, passed_count=0, failed_count=0,
+                passed=False, total=0, passed_count=0, failed_count=0,
                 error_count=0, skipped_count=0, test_cases=[],
-                coverage_percent=None, summary_for_llm="pytest가 설치되어 있지 않습니다.",
+                coverage_percent=None,
+                summary_for_llm="[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요.",
             )
         except subprocess.TimeoutExpired:
             return TestResult(
@@ -75,9 +76,10 @@ class TestRunnerSensor:
             )
         except FileNotFoundError:
             return TestResult(
-                passed=True, total=0, passed_count=0, failed_count=0,
+                passed=False, total=0, passed_count=0, failed_count=0,
                 error_count=0, skipped_count=0, test_cases=[],
-                coverage_percent=None, summary_for_llm="pytest가 설치되어 있지 않습니다.",
+                coverage_percent=None,
+                summary_for_llm="[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요.",
             )
         except subprocess.TimeoutExpired:
             return TestResult(

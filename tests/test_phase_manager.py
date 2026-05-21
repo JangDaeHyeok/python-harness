@@ -14,6 +14,7 @@ from harness.context.phase_manager import (
     PhaseStatus,
     TaskIndex,
 )
+from harness.context.project_policy import ProjectPolicy
 
 
 class TestPhaseDefinition:
@@ -96,6 +97,17 @@ class TestPhaseManager:
         assert index.phases[0].docs_diff_ref == ".harness/tasks/sprint-1/docs-diff.md"
         assert "docs/**" in index.phases[0].allowed_files
         assert ".harness/tasks/sprint-1/docs-diff.md" in index.phases[1].inputs
+
+    def test_create_phases_uses_policy_package(self, tmp_path: Path) -> None:
+        policy = ProjectPolicy(package="myapp")
+        mgr = PhaseManager(tmp_path, policy=policy)
+        index = mgr.create_phases(1, "패키지 정책 테스트")
+
+        core_phase = index.phases[1]
+        validation_phase = index.phases[-1]
+        assert "myapp/**" in core_phase.allowed_files
+        assert "harness/**" not in core_phase.allowed_files
+        assert "mypy myapp" in validation_phase.verification
 
     def test_create_phases_custom(self, tmp_path: Path) -> None:
         mgr = PhaseManager(tmp_path)
