@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,7 +42,15 @@ class TestRunnerSensor:
 
     def run_pytest(self, coverage: bool = True) -> TestResult:
         """pytest를 실행하고 결과를 구조화한다."""
-        cmd = ["python", "-m", "pytest", "--tb=short", "-q", "--json-report", "--json-report-file=-"]
+        cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--tb=short",
+            "-q",
+            "--json-report",
+            "--json-report-file=-",
+        ]
         if coverage:
             cmd.extend(["--cov=.", "--cov-report=json:/dev/stdout"])
 
@@ -64,13 +73,16 @@ class TestRunnerSensor:
                 coverage_percent=None, summary_for_llm="테스트 실행 타임아웃 (300초)",
             )
 
+        if self._is_missing_pytest_module(result):
+            return self._missing_pytest_result()
+
         return self._parse_pytest_output(result)
 
     def run_pytest_simple(self) -> TestResult:
         """pytest를 JSON report 없이 간단하게 실행한다."""
         try:
             result = subprocess.run(
-                ["python", "-m", "pytest", "--tb=short", "-v"],
+                [sys.executable, "-m", "pytest", "--tb=short", "-v"],
                 cwd=str(self.project_dir),
                 capture_output=True, text=True, timeout=300,
             )
@@ -88,7 +100,24 @@ class TestRunnerSensor:
                 coverage_percent=None, summary_for_llm="테스트 실행 타임아웃 (300초)",
             )
 
+        if self._is_missing_pytest_module(result):
+            return self._missing_pytest_result()
+
         return self._parse_simple_output(result)
+
+    def _missing_pytest_result(self) -> TestResult:
+        return TestResult(
+            passed=False, total=0, passed_count=0, failed_count=0,
+            error_count=0, skipped_count=0, test_cases=[],
+            coverage_percent=None,
+            summary_for_llm="[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요.",
+        )
+
+    def _is_missing_pytest_module(
+        self, result: subprocess.CompletedProcess[str]
+    ) -> bool:
+        output = result.stdout + "\n" + result.stderr
+        return "No module named pytest" in output or "No module named 'pytest'" in output
 
     def _parse_pytest_output(self, result: subprocess.CompletedProcess[str]) -> TestResult:
         """pytest JSON report 출력을 파싱한다."""

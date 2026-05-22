@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -73,3 +75,73 @@ def test_test_runner_simple_missing_pytest_fails(tmp_path: Path) -> None:
     assert result.summary_for_llm == (
         "[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요."
     )
+
+
+def test_test_runner_missing_pytest_module_fails_as_env_error(
+    tmp_path: Path,
+) -> None:
+    sensor = PytestRunnerSensor(str(tmp_path))
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=1,
+        stdout="",
+        stderr=f"{sys.executable}: No module named pytest",
+    )
+
+    with patch("subprocess.run", return_value=completed):
+        result = sensor.run_pytest()
+
+    assert not result.passed
+    assert result.summary_for_llm == (
+        "[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요."
+    )
+
+
+def test_test_runner_simple_missing_pytest_module_fails_as_env_error(
+    tmp_path: Path,
+) -> None:
+    sensor = PytestRunnerSensor(str(tmp_path))
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=1,
+        stdout="",
+        stderr=f"{sys.executable}: No module named pytest",
+    )
+
+    with patch("subprocess.run", return_value=completed):
+        result = sensor.run_pytest_simple()
+
+    assert not result.passed
+    assert result.summary_for_llm == (
+        "[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요."
+    )
+
+
+def test_test_runner_uses_current_python_for_pytest(tmp_path: Path) -> None:
+    sensor = PytestRunnerSensor(str(tmp_path))
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=5,
+        stdout="",
+        stderr="no tests collected",
+    )
+
+    with patch("subprocess.run", return_value=completed) as run:
+        sensor.run_pytest()
+
+    assert run.call_args.args[0][0] == sys.executable
+
+
+def test_test_runner_simple_uses_current_python_for_pytest(tmp_path: Path) -> None:
+    sensor = PytestRunnerSensor(str(tmp_path))
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=5,
+        stdout="",
+        stderr="no tests collected",
+    )
+
+    with patch("subprocess.run", return_value=completed) as run:
+        sensor.run_pytest_simple()
+
+    assert run.call_args.args[0][0] == sys.executable

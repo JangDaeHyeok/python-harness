@@ -68,6 +68,8 @@ def test_migrate_single_package_auto_adopts_and_creates_required_files(
     assert (tmp_path / ".harness/project-policy.yaml").exists()
     assert (tmp_path / "tests").is_dir()
     assert (tmp_path / "scripts").is_dir()
+    assert (tmp_path / "tests/.gitkeep").exists()
+    assert (tmp_path / "scripts/.gitkeep").exists()
     assert not (tmp_path / "CLAUDE.md").exists()
     assert not (tmp_path / "README.md").exists()
     assert not (tmp_path / ".claude/skills").exists()
@@ -81,6 +83,20 @@ def test_migrate_single_package_auto_adopts_and_creates_required_files(
     no_print = next(rule for rule in structure["rules"] if rule["name"] == "no_print_debug")
     assert no_print["directories"] == ["billing"]
     _assert_migration_gate_passes(tmp_path)
+
+
+def test_migrate_existing_empty_tests_and_scripts_get_gitkeep(
+    tmp_path: Path,
+) -> None:
+    _write_package(tmp_path, "billing")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts").mkdir()
+
+    initializer = BootstrapInitializer(project_dir=tmp_path, offline=True)
+    initializer.migrate_existing()
+
+    assert (tmp_path / "tests/.gitkeep").exists()
+    assert (tmp_path / "scripts/.gitkeep").exists()
 
 
 def test_migrate_existing_0001_adr_is_required_by_generated_structure(

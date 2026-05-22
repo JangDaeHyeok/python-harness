@@ -587,7 +587,13 @@ class BootstrapInitializer:
 
     def _ensure_migration_dirs(self) -> None:
         for relative_dir in _MIGRATION_REQUIRED_DIRS:
-            (self.project_dir / relative_dir).mkdir(parents=True, exist_ok=True)
+            target_dir = self.project_dir / relative_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            if (
+                relative_dir in {Path("tests"), Path("scripts")}
+                and not any(target_dir.iterdir())
+            ):
+                (target_dir / ".gitkeep").write_text("", encoding="utf-8")
 
     def _migration_path_overrides(self) -> dict[TargetKind, Path]:
         adr_dir = self.project_dir / "docs/adr"
