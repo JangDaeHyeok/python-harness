@@ -41,6 +41,9 @@ class ProjectPolicy:
         "review_comments": True,
         "pr_body": True,
     })
+    review_tools: dict[str, bool] = field(default_factory=lambda: {
+        "coderabbit": False,
+    })
     external_adr_sources: list[str] = field(default_factory=list)
     custom_rules: dict[str, Any] = field(default_factory=dict)
 
@@ -59,6 +62,7 @@ class ProjectPolicy:
                 "adr": {"directory": self.adr_directory, "external_sources": self.external_adr_sources},
                 "structure": {"source": self.structure_source},
                 "artifacts": self.artifacts_enabled,
+                "review_tools": self.review_tools,
             },
         }
         if self.python_version:
@@ -93,6 +97,7 @@ class ProjectPolicy:
                 "review_comments": True,
                 "pr_body": True,
             })),
+            review_tools=dict(policies.get("review_tools", {"coderabbit": False})),
             custom_rules=dict(policies.get("custom_rules", {})),
         )
 

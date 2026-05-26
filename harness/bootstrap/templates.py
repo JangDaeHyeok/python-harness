@@ -3,6 +3,10 @@
 LLM 호출이 불가하거나 실패했을 때 폴백으로 사용된다.
 모든 템플릿은 단순 문자열 포맷팅(``str.format``)으로 ``project_name`` /
 ``intent_summary`` / ``package`` 등을 치환한다. 추가 변수는 ``str.format_map``으로 다룬다.
+
+주의: 템플릿 문자열에 YAML/JSON 인라인 매핑(``{key: value}``)을 그대로 쓰면
+``.format_map``이 키로 해석해 ``KeyError``가 발생한다. 리터럴 중괄호가 필요하면
+``{{`` / ``}}``로 이스케이프할 것.
 """
 
 from __future__ import annotations
@@ -173,6 +177,55 @@ policies:
     code_quality_guide: true
     review_comments: true
     pr_body: true
+  review_tools:
+    coderabbit: false
+"""
+
+_CODERABBIT_TEMPLATE = """\
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit configuration for {project_name}.
+# GitHub App installation is still required in the repository settings.
+
+language: ko-KR
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    # 프로젝트의 default branch에 맞춰 수정하세요 (예: develop, trunk).
+    base_branches:
+      - main
+      - master
+  path_filters:
+    - "!**/.venv/**"
+    - "!**/.mypy_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/.pytest_cache/**"
+    - "!**/__pycache__/**"
+    - "!**/build/**"
+    - "!**/dist/**"
+    - "!**/.harness/checkpoints/**"
+    - "!uv.lock"
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CLAUDE.md"
+      - "AGENTS.md"
+      - "docs/code-convention.yaml"
+      - "docs/adr/*.md"
+      - ".harness/project-policy.yaml"
 """
 
 _CLAUDE_SETTINGS_TEMPLATE = """\
@@ -354,6 +407,11 @@ def render_migration_structure(ctx: TemplateContext) -> str:
 def render_policy(ctx: TemplateContext) -> str:
     """기본 프로젝트 정책 YAML을 렌더링한다."""
     return _POLICY_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_coderabbit_config(ctx: TemplateContext) -> str:
+    """기본 CodeRabbit 설정 YAML을 렌더링한다."""
+    return _CODERABBIT_TEMPLATE.format_map(ctx.as_mapping())
 
 
 def render_claude_md(ctx: TemplateContext) -> str:

@@ -69,6 +69,7 @@ modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 - `policies.adr.external_sources`: 외부 프로젝트 ADR 디렉터리 절대 경로 목록. 경로가 존재하지 않거나 디렉터리가 아니면 건너뛴다
 - `policies.structure.source`: 구조 규칙 파일 경로
 - `policies.artifacts`: 리뷰 산출물 생성 여부
+- `policies.review_tools`: 외부 리뷰 도구 통합 플래그. 현재 키는 `coderabbit` (기본값 `false`). `harness-init --with-coderabbit` 사용 시 자동으로 `true`로 동기화된다.
 - `policies.custom_rules`: 프로젝트별 자유 규칙
 
 정책 파일은 에이전트 판단 기준이지 비밀 저장소가 아니다. 토큰, 비밀값, 개인 계정 정보는 넣지 않는다.

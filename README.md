@@ -143,6 +143,19 @@ git init
 harness-init --offline "사내 청구 자동화 도구. Python 3.11, FastAPI, PostgreSQL."
 ```
 
+CodeRabbit 리뷰를 GitHub PR에서 함께 쓰려면 설정 파일을 선택적으로 배포할 수 있다. 이 명령은 `.coderabbit.yaml`만 만들며, GitHub 저장소의 CodeRabbit App 설치와 권한 승인은 별도로 해야 한다.
+
+> ⚠️ `knowledge_base.code_guidelines`에 의해 `CLAUDE.md`, `docs/adr/*.md`, `.harness/project-policy.yaml`이 CodeRabbit(third-party SaaS)으로 전송된다. 사내 정보가 포함될 수 있으니 노출 가능 여부를 확인한 뒤 사용하라.
+
+```bash
+harness-init --with-coderabbit --offline "사내 청구 자동화 도구. Python 3.11, FastAPI, PostgreSQL."
+# 또는 설정 파일만
+harness-init --only coderabbit --offline "GitHub PR 리뷰 자동화"
+```
+
+- `--with-coderabbit`는 `--only` 목록에 `coderabbit`를 추가하는 syntactic sugar다. `--only adr --with-coderabbit`처럼 조합하면 ADR + `.coderabbit.yaml`만 생성된다.
+- 기존 `.harness/project-policy.yaml`이 있어도 `--with-coderabbit` 사용 시 `policies.review_tools.coderabbit` 플래그를 `true`로 자동 동기화한다 (다른 키/주석은 보존). `--force` 없이도 동작.
+
 생성되는 파일:
 - `docs/adr/0001-initial-architecture.md`
 - `docs/code-convention.yaml`
@@ -151,6 +164,7 @@ harness-init --offline "사내 청구 자동화 도구. Python 3.11, FastAPI, Po
 - `CLAUDE.md`
 - **`.claude/settings.json`** — 팀 공유 allow/deny + Stop hook 연결
 - **`.claude/hooks/post_session_checks.sh`** — fresh 프로젝트에서도 안전한 선택형 검사. 설치된 도구와 존재하는 파일 기준으로 ruff·mypy·structure·pytest를 실행하고, 없으면 건너뜀
+- `--with-coderabbit` 또는 `--only coderabbit` 사용 시 **`.coderabbit.yaml`** — CodeRabbit PR 리뷰 설정 템플릿
 
 잘 생성됐는지 확인:
 
@@ -583,7 +597,8 @@ cp -R /path/to/python-harness/.claude/skills .claude/skills
 | `"의도"` | 프로젝트의 자연어 설명 (LLM 보강에 사용) |
 | `--offline` | LLM 호출 없이 내장 템플릿만으로 셋업 |
 | `--project-dir <path>` | 다른 디렉터리에 셋업 |
-| `--only <kinds>` | 일부만 배포 (`adr,policy,claude-config` 등 콤마 구분) |
+| `--only <kinds>` | 일부만 배포 (`adr,policy,claude-config,coderabbit` 등 콤마 구분) |
+| `--with-coderabbit` | `.coderabbit.yaml` 배포 + 기존 정책 파일의 `review_tools.coderabbit`를 `true`로 동기화 (GitHub App 설치는 별도) |
 | `--force` | 기존 파일 덮어쓰기 (기본은 보존) |
 | `--dry-run` | 만들 파일 목록만 보여주고 실제로 쓰지 않음 |
 | `--migrate` | 기존 Python 프로젝트에 하네스 필수 구조를 보강 (`adr,convention,structure,policy` 중심) |

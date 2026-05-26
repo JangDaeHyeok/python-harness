@@ -27,6 +27,7 @@ from harness.bootstrap.initializer import (
 from harness.bootstrap.templates import (
     TemplateContext,
     render_adr,
+    render_coderabbit_config,
     render_convention,
     render_policy,
     render_structure,
@@ -143,6 +144,18 @@ class TestTemplates:
         loaded = yaml.safe_load(render_policy(ctx))
         assert loaded["project"]["package"] == "my_svc"
 
+    def test_render_policy_yaml_includes_coderabbit_review_tool_flag(self) -> None:
+        ctx = TemplateContext(project_name="my-svc", intent_summary="y")
+        loaded = yaml.safe_load(render_policy(ctx))
+        assert loaded["policies"]["review_tools"]["coderabbit"] is False
+
+    def test_render_coderabbit_config_is_parseable(self) -> None:
+        ctx = TemplateContext(project_name="my-svc", intent_summary="y")
+        loaded = yaml.safe_load(render_coderabbit_config(ctx))
+        assert loaded["language"] == "ko-KR"
+        assert loaded["reviews"]["auto_review"]["enabled"] is True
+        assert "CLAUDE.md" in loaded["knowledge_base"]["code_guidelines"]["filePatterns"]
+
 
 class TestDeriveProjectName:
     def test_quoted_name_in_prompt(self, tmp_path: Path) -> None:
@@ -237,6 +250,103 @@ class TestBootstrapInitializerOffline:
         assert {p.kind for p in result.plans} == {TargetKind.ADR, TargetKind.POLICY}
         assert (tmp_path / relative_path_for(TargetKind.ADR)).exists()
         assert not (tmp_path / relative_path_for(TargetKind.STRUCTURE)).exists()
+
+    def test_coderabbit_is_optional_target(self, tmp_path: Path) -> None:
+        initializer = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="GitHub 리뷰 자동화",
+            offline=True,
+            targets=[TargetKind.CODERABBIT],
+        )
+        result = initializer.run()
+
+        assert result.created_count == 1
+        target = tmp_path / relative_path_for(TargetKind.CODERABBIT)
+        assert target.exists()
+        loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+        assert loaded["reviews"]["auto_review"]["enabled"] is True
+
+    def test_existing_policy_is_patched_when_coderabbit_added(
+        self, tmp_path: Path
+    ) -> None:
+        """기존 정책 파일이 있어도 --with-coderabbit 시 플래그가 true로 동기화된다."""
+        # 1) 정책 파일을 먼저 만든다 (coderabbit: false 상태)
+        BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=True,
+            targets=[TargetKind.POLICY],
+        ).run()
+
+        policy_path = tmp_path / relative_path_for(TargetKind.POLICY)
+        original = policy_path.read_text(encoding="utf-8")
+        assert "coderabbit: false" in original
+        assert "# 이 프로젝트의 메인 패키지 디렉토리명. 필수." in original
+
+        # 2) --with-coderabbit (force 없이) 재실행
+        result = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=True,
+            targets=[TargetKind.CODERABBIT, TargetKind.POLICY],
+        ).run()
+
+        patched = policy_path.read_text(encoding="utf-8")
+        assert "coderabbit: true" in patched
+        # 주석은 보존되어야 한다
+        assert "# 이 프로젝트의 메인 패키지 디렉토리명. 필수." in patched
+
+        patch_plans = [p for p in result.plans if p.source == "patch"]
+        assert len(patch_plans) == 1
+        assert patch_plans[0].kind is TargetKind.POLICY
+        assert patch_plans[0].existed_before is True
+
+    def test_existing_policy_patch_is_idempotent(self, tmp_path: Path) -> None:
+        """이미 true인 정책에 대해선 patch plan이 추가되지 않는다."""
+        BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=True,
+            targets=[TargetKind.POLICY, TargetKind.CODERABBIT],
+        ).run()
+        policy_path = tmp_path / relative_path_for(TargetKind.POLICY)
+        before = policy_path.read_text(encoding="utf-8")
+        assert "coderabbit: true" in before
+
+        result = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=True,
+            targets=[TargetKind.CODERABBIT],
+        ).run()
+        after = policy_path.read_text(encoding="utf-8")
+        assert after == before
+        assert not any(p.source == "patch" for p in result.plans)
+
+    def test_dry_run_does_not_patch_existing_policy(self, tmp_path: Path) -> None:
+        """dry-run에서는 정책 파일이 실제로 바뀌지 않고 plan만 보고된다."""
+        BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=True,
+            targets=[TargetKind.POLICY],
+        ).run()
+        policy_path = tmp_path / relative_path_for(TargetKind.POLICY)
+        before = policy_path.read_text(encoding="utf-8")
+        assert "coderabbit: false" in before
+
+        result = BootstrapInitializer(
+            project_dir=tmp_path,
+            prompt="x",
+            offline=True,
+            dry_run=True,
+            targets=[TargetKind.CODERABBIT],
+        ).run()
+        after = policy_path.read_text(encoding="utf-8")
+        assert after == before  # disk 변경 없음
+        patch_plans = [p for p in result.plans if p.source == "patch"]
+        assert len(patch_plans) == 1
+        assert patch_plans[0].kind is TargetKind.POLICY
 
     def test_dry_run_does_not_write(self, tmp_path: Path) -> None:
         initializer = BootstrapInitializer(

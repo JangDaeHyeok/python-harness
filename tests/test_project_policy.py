@@ -19,6 +19,7 @@ class TestProjectPolicy:
         assert "mypy" in policy.required_checks
         assert "pytest" in policy.required_checks
         assert "structure" in policy.required_checks
+        assert policy.review_tools == {"coderabbit": False}
 
     def test_to_yaml_and_back(self) -> None:
         policy = ProjectPolicy(
@@ -47,6 +48,7 @@ class TestProjectPolicy:
                 "adr": {"directory": "adrs/"},
                 "structure": {"source": "rules.yaml"},
                 "artifacts": {"design_intent": False},
+                "review_tools": {"coderabbit": True},
                 "custom_rules": {"max_complexity": 10},
             },
         }
@@ -57,6 +59,7 @@ class TestProjectPolicy:
         assert policy.required_checks == ["ruff"]
         assert policy.conventions_source == "custom.yaml"
         assert policy.adr_directory == "adrs/"
+        assert policy.review_tools == {"coderabbit": True}
         assert policy.custom_rules == {"max_complexity": 10}
 
     def test_from_dict_with_defaults(self) -> None:
@@ -66,6 +69,7 @@ class TestProjectPolicy:
         assert policy.review_language == "ko"
         assert len(policy.required_checks) == 4
         assert policy.external_adr_sources == []
+        assert policy.review_tools == {"coderabbit": False}
 
     def test_from_dict_with_external_adr_sources(self) -> None:
         data = {

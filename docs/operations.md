@@ -49,6 +49,8 @@ pip install -e ".[dev]"
 | `harness-init --project-dir ./billing --offline "PoC"` | 다른 디렉터리 부트스트랩 |
 | `harness-init --only adr,policy --offline "데이터 파이프라인"` | 특정 항목만 |
 | `harness-init --only claude-config --offline "팀 셋업만 배포"` | `.claude/settings.json` + Stop 훅 |
+| `harness-init --with-coderabbit --offline "GitHub 리뷰 자동화"` | `.coderabbit.yaml` 템플릿도 함께 생성 |
+| `harness-init --only coderabbit --offline "GitHub 리뷰 자동화"` | CodeRabbit 설정 파일만 생성 |
 | `harness-init --force --only claude --offline "운영 가이드 갱신"` | 덮어쓰기 |
 | `harness-init --dry-run --offline "사전 검토"` | 미리보기 |
 
@@ -89,7 +91,11 @@ pip install -e ".[dev]"
 - 대상 파일: `docs/adr/0001-initial-architecture.md`, `docs/code-convention.yaml`, `harness_structure.yaml`, `.harness/project-policy.yaml`, `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/post_session_checks.sh`.
 - 자연어 프롬프트로 프로젝트 의도를 전달하면 ADR/CLAUDE.md 요약에 반영된다.
 - 기본 동작: 누락 파일만 생성, 기존 파일은 보존(`--force`로 덮어쓰기).
-- `--only`로 특정 항목(`adr,convention,structure,policy,claude,claude-config`)만 생성·관리.
+- `--only`로 특정 항목(`adr,convention,structure,policy,claude,claude-config,coderabbit`)만 생성·관리.
+- CodeRabbit 설정은 선택 사항이다. `--with-coderabbit` 또는 `--only coderabbit`을 쓰면 `.coderabbit.yaml`을 생성한다. `--with-coderabbit`는 `--only` 목록에 `coderabbit`를 추가하는 동작과 같다.
+- `--with-coderabbit` 사용 시 기존 `.harness/project-policy.yaml`이 있어도 `policies.review_tools.coderabbit` 플래그를 `true`로 자동 동기화한다. 다른 키/주석은 보존된다.
+- `.coderabbit.yaml`의 `knowledge_base.code_guidelines`로 인해 `CLAUDE.md`, `docs/adr/*.md`, `.harness/project-policy.yaml`이 CodeRabbit(third-party SaaS)으로 전송된다. 사내 정보 포함 여부를 검토한 뒤 사용한다.
+- `harness-init`은 CodeRabbit GitHub App을 설치하지 않는다. 저장소 설정에서 App 설치와 권한 승인을 별도로 완료해야 PR 리뷰가 실행된다.
 - `claude-config`는 보안 설정이므로 LLM에 위임하지 않고 결정적 템플릿을 사용한다. 이 대상은 `.claude/settings.json`과 Stop 훅 스크립트를 함께 생성하며, 두 파일은 각각 별도 `BootstrapPlan` 항목으로 요약에 노출된다. 쓰기 순서는 sidecar hook → `settings.json` 순이라 중간 실패가 발생해도 다음 실행이 fresh 경로로 깔끔히 복구된다. 기존 `settings.json`이 있어도 Stop 훅 스크립트가 누락되었으면 sidecar hook만 복구한다.
 - `.claude/settings.json` allow 목록은 좁힌 패턴만 사용한다. `pip install *` 같은 와일드카드와 `gh pr *`/`gh api *` 무제약 패턴은 금지하고, `gh pr view/list/diff/status/checks/comment/create *`만 허용한다. `gh api repos/*`도 HTTP 메서드 플래그로 쓰기 요청이 가능하므로 팀 공유 allow에서는 제외한다. destructive 서브명령(`gh pr merge|close|reopen|edit`)은 일부러 빼고 사용자 확인을 거치게 한다.
 - 부트스트랩 Stop 훅은 fresh 프로젝트에서 실패하지 않도록 설치된 도구와 존재하는 파일만 검사한다. `scripts/check_structure.py`나 `tests/`가 없으면 해당 단계는 건너뛰고, `pytest`가 수집한 테스트가 0건(exit 5)이면 성공으로 간주한다.

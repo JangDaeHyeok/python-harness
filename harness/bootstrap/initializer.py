@@ -31,6 +31,7 @@ from harness.bootstrap.templates import (
     render_adr,
     render_claude_md,
     render_claude_settings,
+    render_coderabbit_config,
     render_convention,
     render_migration_structure,
     render_policy,
@@ -56,6 +57,7 @@ class TargetKind(Enum):
     POLICY = "policy"
     CLAUDE = "claude"
     CLAUDE_CONFIG = "claude-config"
+    CODERABBIT = "coderabbit"
 
 
 ALL_TARGETS: tuple[TargetKind, ...] = (
@@ -67,6 +69,12 @@ ALL_TARGETS: tuple[TargetKind, ...] = (
     TargetKind.CLAUDE_CONFIG,
 )
 
+OPTIONAL_TARGETS: tuple[TargetKind, ...] = (
+    TargetKind.CODERABBIT,
+)
+
+SUPPORTED_TARGETS: tuple[TargetKind, ...] = ALL_TARGETS + OPTIONAL_TARGETS
+
 _RELATIVE_PATHS: dict[TargetKind, Path] = {
     TargetKind.ADR: Path("docs/adr/0001-initial-architecture.md"),
     TargetKind.CONVENTION: Path("docs/code-convention.yaml"),
@@ -74,9 +82,15 @@ _RELATIVE_PATHS: dict[TargetKind, Path] = {
     TargetKind.POLICY: Path(".harness/project-policy.yaml"),
     TargetKind.CLAUDE: Path("CLAUDE.md"),
     TargetKind.CLAUDE_CONFIG: Path(".claude/settings.json"),
+    TargetKind.CODERABBIT: Path(".coderabbit.yaml"),
 }
 
 _LLM_VALIDATORS: dict[TargetKind, Callable[[str], bool]] = {}
+
+_POLICY_CODERABBIT_FLAG_PATTERN = re.compile(
+    r"^(?P<indent>[ \t]*)coderabbit:[ \t]*(?P<value>false|true)[ \t]*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def relative_path_for(kind: TargetKind) -> Path:
@@ -294,6 +308,7 @@ _LLM_VALIDATORS.update({
     TargetKind.STRUCTURE: _validate_structure_yaml,
     TargetKind.POLICY: _validate_policy_yaml,
     TargetKind.CLAUDE: lambda t: bool(t.strip()),
+    TargetKind.CODERABBIT: _validate_yaml,
 })
 
 
@@ -324,6 +339,10 @@ _LLM_INSTRUCTIONS: dict[TargetKind, str] = {
     ),
     TargetKind.CLAUDE: (
         "다음은 CLAUDE.md 초안입니다. 사용자의 의도와 운영 원칙, 품질 기준, 자주 쓰는 명령을 한국어로 정리해 보강하세요."
+    ),
+    TargetKind.CODERABBIT: (
+        "다음은 .coderabbit.yaml 초안입니다. Python 프로젝트와 GitHub PR 리뷰 자동화에 맞게 다듬으세요. "
+        "최상위 YAML 매핑이어야 하며, GitHub App 설치가 별도로 필요하다는 주석은 유지하세요."
     ),
 }
 
@@ -416,7 +435,9 @@ class BootstrapInitializer:
             TargetKind.POLICY: render_policy,
             TargetKind.CLAUDE: render_claude_md,
             TargetKind.CLAUDE_CONFIG: render_claude_settings,
+            TargetKind.CODERABBIT: render_coderabbit_config,
         }
+        coderabbit_selected = TargetKind.CODERABBIT in targets
 
         for kind in targets:
             target_path = self.project_dir / paths.get(kind, _RELATIVE_PATHS[kind])
@@ -440,6 +461,8 @@ class BootstrapInitializer:
                 source = "template"
             else:
                 template_text = renderers[kind](ctx)
+                if kind is TargetKind.POLICY and coderabbit_selected:
+                    template_text, _ = self._apply_coderabbit_flag(template_text)
                 content, source = self._maybe_customize_with_llm(kind, template_text, ctx)
 
             main_plan = BootstrapPlan(
@@ -473,6 +496,62 @@ class BootstrapInitializer:
                 if not self.dry_run:
                     self._write_file(target_path, content)
                 result.plans.append(main_plan)
+
+        if coderabbit_selected:
+            self._sync_existing_policy_coderabbit_flag(result)
+
+    @staticmethod
+    def _apply_coderabbit_flag(policy_text: str) -> tuple[str, bool]:
+        """정책 텍스트의 ``review_tools.coderabbit`` 플래그를 ``true``로 켠다.
+
+        반환값은 ``(새 텍스트, 변경 여부)``. 라인 단위 정규식으로 동작해
+        템플릿 주석과 사용자 hand-edit을 모두 보존한다. 매치가 없으면
+        원본을 그대로 돌려준다.
+        """
+        matches = list(_POLICY_CODERABBIT_FLAG_PATTERN.finditer(policy_text))
+        if not matches:
+            return policy_text, False
+        if all(m.group("value").lower() == "true" for m in matches):
+            return policy_text, False
+        new_text = _POLICY_CODERABBIT_FLAG_PATTERN.sub(
+            lambda m: f"{m.group('indent')}coderabbit: true", policy_text
+        )
+        return new_text, new_text != policy_text
+
+    def _sync_existing_policy_coderabbit_flag(self, result: BootstrapResult) -> None:
+        """기존 정책 파일이 있다면 ``coderabbit`` 플래그를 ``true``로 동기화한다.
+
+        이 실행에서 정책 파일이 새로 (재)작성됐다면 렌더 단계에서 이미
+        플래그가 반영됐으므로 건너뛴다.
+        """
+        policy_path = self.project_dir / _RELATIVE_PATHS[TargetKind.POLICY]
+        already_written = any(
+            p.kind is TargetKind.POLICY and p.will_write for p in result.plans
+        )
+        if already_written or not policy_path.exists():
+            return
+
+        try:
+            original = policy_path.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning("정책 파일 읽기 실패, CodeRabbit 플래그 동기화 생략: %s", e)
+            return
+
+        patched, changed = self._apply_coderabbit_flag(original)
+        if not changed:
+            return
+
+        plan = BootstrapPlan(
+            kind=TargetKind.POLICY,
+            target_path=policy_path,
+            content=patched,
+            existed_before=True,
+            will_write=True,
+            source="patch",
+        )
+        if not self.dry_run:
+            self._write_file(policy_path, patched)
+        result.plans.append(plan)
 
     def _append_missing_claude_hook_plan(
         self, result: BootstrapResult, ctx: TemplateContext

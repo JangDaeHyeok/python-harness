@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.bootstrap.initializer import (
     ALL_TARGETS,
+    SUPPORTED_TARGETS,
     BootstrapInitializer,
     TargetKind,
 )
@@ -41,14 +42,14 @@ def _setup_logging(verbose: bool) -> None:
 def _parse_targets(raw: str | None) -> list[TargetKind]:
     if not raw:
         return list(ALL_TARGETS)
-    valid = {t.value: t for t in ALL_TARGETS}
+    valid = {t.value: t for t in SUPPORTED_TARGETS}
     selected: list[TargetKind] = []
     for token in raw.split(","):
         key = token.strip().lower()
         if not key:
             continue
         if key not in valid:
-            choices = ", ".join(t.value for t in ALL_TARGETS)
+            choices = ", ".join(t.value for t in SUPPORTED_TARGETS)
             raise SystemExit(f"알 수 없는 --only 항목: {key!r} (가능: {choices})")
         if valid[key] not in selected:
             selected.append(valid[key])
@@ -92,7 +93,15 @@ def main() -> None:
         default=None,
         help=(
             "초기화할 대상만 지정 (콤마 구분). 가능한 값: "
-            + ", ".join(t.value for t in ALL_TARGETS)
+            + ", ".join(t.value for t in SUPPORTED_TARGETS)
+        ),
+    )
+    parser.add_argument(
+        "--with-coderabbit",
+        action="store_true",
+        help=(
+            ".coderabbit.yaml 템플릿도 함께 생성한다 (GitHub App 설치는 별도). "
+            "--only와 함께 쓰면 해당 목록에 coderabbit를 추가한다."
         ),
     )
     parser.add_argument(
@@ -133,6 +142,8 @@ def main() -> None:
         project_dir.mkdir(parents=True, exist_ok=True)
 
     targets = _parse_targets(args.only)
+    if args.with_coderabbit and TargetKind.CODERABBIT not in targets:
+        targets.append(TargetKind.CODERABBIT)
     client = _resolve_client(args.offline, args.api_endpoint)
 
     initializer = BootstrapInitializer(
@@ -173,6 +184,8 @@ def main() -> None:
         print("[MIGRATE] 완료. 다음 단계:")
         print("  1) docs/adr/0001-* 를 검토하세요.")
         print("  2) harness 명령으로 첫 실행을 시도하세요.")
+    if TargetKind.CODERABBIT in targets:
+        print("[CodeRabbit] GitHub 저장소에 CodeRabbit App을 별도로 설치해야 리뷰가 실행됩니다.")
     print("=" * 60)
 
 

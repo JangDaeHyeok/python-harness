@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from harness.bootstrap.initializer import ALL_TARGETS, TargetKind, relative_path_for
 from scripts import init_harness
@@ -51,6 +52,75 @@ def test_main_only_filter_limits_targets(tmp_path: Path) -> None:
     assert (project_dir / relative_path_for(TargetKind.POLICY)).exists()
     assert (project_dir / relative_path_for(TargetKind.ADR)).exists()
     assert not (project_dir / relative_path_for(TargetKind.STRUCTURE)).exists()
+
+
+def test_main_with_coderabbit_creates_optional_config(tmp_path: Path) -> None:
+    project_dir = tmp_path / "demo"
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "init_harness.py",
+            "--project-dir",
+            str(project_dir),
+            "--offline",
+            "--with-coderabbit",
+            "x",
+        ],
+    ):
+        init_harness.main()
+
+    assert (project_dir / ".coderabbit.yaml").exists()
+    policy = yaml.safe_load(
+        (project_dir / relative_path_for(TargetKind.POLICY)).read_text(encoding="utf-8")
+    )
+    assert policy["policies"]["review_tools"]["coderabbit"] is True
+
+
+def test_main_only_coderabbit_limits_to_optional_config(tmp_path: Path) -> None:
+    project_dir = tmp_path / "demo"
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "init_harness.py",
+            "--project-dir",
+            str(project_dir),
+            "--offline",
+            "--only",
+            "coderabbit",
+            "x",
+        ],
+    ):
+        init_harness.main()
+
+    assert (project_dir / ".coderabbit.yaml").exists()
+    assert not (project_dir / relative_path_for(TargetKind.POLICY)).exists()
+
+
+def test_main_with_coderabbit_extends_only_filter(tmp_path: Path) -> None:
+    """--with-coderabbit는 --only 목록에 coderabbit를 추가하는 sugar로 동작한다."""
+    project_dir = tmp_path / "demo"
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "init_harness.py",
+            "--project-dir",
+            str(project_dir),
+            "--offline",
+            "--only",
+            "adr",
+            "--with-coderabbit",
+            "x",
+        ],
+    ):
+        init_harness.main()
+
+    assert (project_dir / relative_path_for(TargetKind.ADR)).exists()
+    assert (project_dir / ".coderabbit.yaml").exists()
+    # POLICY는 targets에 없었으므로 생성되지 않는다
+    assert not (project_dir / relative_path_for(TargetKind.POLICY)).exists()
 
 
 def test_main_rejects_unknown_only(tmp_path: Path) -> None:
