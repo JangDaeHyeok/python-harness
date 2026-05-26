@@ -444,6 +444,14 @@ def run_pipeline(
                     )
 
     if auto_merge and pr_info.number > 0:
+        review_commit_failed = any(
+            error.startswith("리뷰 반영 커밋 실패") for error in result.errors
+        )
+        if result.actionable_comments and (not result.review_applied or review_commit_failed):
+            result.errors.append(
+                "자동 머지 건너뜀: 반영 대상 리뷰 코멘트가 아직 커밋되지 않았습니다."
+            )
+            return result
         merged = merge_pr(project_dir, pr_info.number)
         result.merged = merged
 

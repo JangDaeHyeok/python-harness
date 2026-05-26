@@ -243,3 +243,71 @@ class TestRunPipelineReviewAutomation:
         assert result.replies_posted == 0
         assert result.errors
         mock_replies.assert_not_called()
+
+    def test_auto_merge_skips_when_review_apply_fails(self, tmp_path: Path) -> None:
+        with (
+            patch("scripts.auto_pr_pipeline.push_branch", return_value="feat/test"),
+            patch(
+                "scripts.auto_pr_pipeline.create_pr",
+                return_value=PRInfo(number=7, url="https://github.com/o/r/pull/7"),
+            ),
+            patch(
+                "scripts.auto_pr_pipeline.collect_review_comments",
+                return_value=[
+                    ReviewComment(
+                        comment_id=1,
+                        body="fix this bug",
+                        path="a.py",
+                        line=3,
+                        author="coderabbit",
+                        decision=ReviewDecision.ACCEPT,
+                        reason="수정 필요",
+                    ),
+                ],
+            ),
+            patch("scripts.auto_pr_pipeline.save_review_decision_log"),
+            patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=False),
+            patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
+        ):
+            result = run_pipeline(tmp_path, poll_reviews=False, auto_merge=True)
+
+        assert result.review_applied is False
+        assert result.merged is False
+        assert any("자동 머지 건너뜀" in error for error in result.errors)
+        mock_merge.assert_not_called()
+
+    def test_auto_merge_skips_when_review_commit_fails(self, tmp_path: Path) -> None:
+        with (
+            patch("scripts.auto_pr_pipeline.push_branch", return_value="feat/test"),
+            patch(
+                "scripts.auto_pr_pipeline.create_pr",
+                return_value=PRInfo(number=7, url="https://github.com/o/r/pull/7"),
+            ),
+            patch(
+                "scripts.auto_pr_pipeline.collect_review_comments",
+                return_value=[
+                    ReviewComment(
+                        comment_id=1,
+                        body="fix this bug",
+                        path="a.py",
+                        line=3,
+                        author="coderabbit",
+                        decision=ReviewDecision.ACCEPT,
+                        reason="수정 필요",
+                    ),
+                ],
+            ),
+            patch("scripts.auto_pr_pipeline.save_review_decision_log"),
+            patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=True),
+            patch(
+                "scripts.auto_pr_pipeline._run_git",
+                side_effect=["", PipelineError("nothing to commit")],
+            ),
+            patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
+        ):
+            result = run_pipeline(tmp_path, poll_reviews=False, auto_merge=True)
+
+        assert result.review_applied is True
+        assert result.merged is False
+        assert any("자동 머지 건너뜀" in error for error in result.errors)
+        mock_merge.assert_not_called()

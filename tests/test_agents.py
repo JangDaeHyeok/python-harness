@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from harness.agents.base_agent import AgentConfig, AgentMessage, BaseAgent
+from harness.agents.generator import GeneratorAgent
 from harness.agents.planner import PlannerAgent, ProductSpec
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestAgentConfig:
@@ -107,3 +111,21 @@ class TestBaseAgentTokenUsage:
         b._token_usage = {"input": 100, "output": 50}
         a.merge_token_usage(b)
         assert a.token_usage == {"input": 110, "output": 55}
+
+
+class TestGeneratorToolPathSafety:
+    def test_run_command_rejects_cwd_outside_project(self, tmp_path: Path) -> None:
+        generator = GeneratorAgent(str(tmp_path))
+
+        result = generator._run_command("pwd", "/tmp")
+
+        assert result.startswith("Error:")
+        assert "프로젝트 디렉터리 밖" in result
+
+    def test_list_files_rejects_path_outside_project(self, tmp_path: Path) -> None:
+        generator = GeneratorAgent(str(tmp_path))
+
+        result = generator._list_files("/tmp", recursive=False)
+
+        assert result.startswith("Error:")
+        assert "프로젝트 디렉터리 밖" in result

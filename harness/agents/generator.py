@@ -140,7 +140,13 @@ class GeneratorAgent(BaseAgent):
         return content
 
     def _run_command(self, command: str, cwd: str | None = None) -> str:
-        work_dir = str(self.project_dir / cwd) if cwd else str(self.project_dir)
+        if cwd:
+            is_safe, reason = validate_path(cwd, self.project_dir)
+            if not is_safe:
+                return f"Error: {reason}"
+            work_dir = str((self.project_dir / cwd).resolve())
+        else:
+            work_dir = str(self.project_dir)
         return run_command_safe(command, work_dir)
 
     def _git_commit(self, message: str) -> str:
@@ -159,17 +165,21 @@ class GeneratorAgent(BaseAgent):
             return f"Git 커밋 실패: {e}"
 
     def _list_files(self, path: str, recursive: bool) -> str:
-        target = self.project_dir / path
+        is_safe, reason = validate_path(path, self.project_dir)
+        if not is_safe:
+            return f"Error: {reason}"
+        project_root = self.project_dir.resolve()
+        target = (project_root / path).resolve()
         if not target.exists():
             return f"Error: 경로를 찾을 수 없음 - {path}"
         if recursive:
             files = [
-                str(f.relative_to(self.project_dir))
+                str(f.relative_to(project_root))
                 for f in target.rglob("*")
                 if f.is_file() and not any(d in f.parts for d in IGNORED_DIRS)
             ]
         else:
-            files = [str(f.relative_to(self.project_dir)) for f in target.iterdir()]
+            files = [str(f.relative_to(project_root)) for f in target.iterdir()]
         return "\n".join(sorted(files)[:100])
 
     def implement_sprint(
