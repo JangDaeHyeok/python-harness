@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import shlex
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +14,7 @@ from harness.sensors.computational.linter import LinterSensor, LintResult
 from harness.sensors.computational.structure_test import StructureAnalyzer, StructureResult
 from harness.sensors.computational.test_runner import TestResult, TestRunnerSensor
 from harness.sensors.computational.type_checker import TypeCheckerSensor, TypeCheckResult
+from harness.tools.shell import run_argv_safe
 
 logger = logging.getLogger(__name__)
 
@@ -187,25 +187,28 @@ class HarnessPipeline:
         script_exists = (Path(self.project_dir) / "scripts" / "check_structure.py").exists()
         if command == default_command and not script_exists:
             return self.structure_analyzer.analyze()
-        try:
-            result = subprocess.run(
-                self._python_command(shlex.split(command)),
-                cwd=self.project_dir,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        except FileNotFoundError:
+        result = run_argv_safe(
+            self._python_command(shlex.split(command)),
+            self.project_dir,
+            timeout=120,
+        )
+        if result.returncode == 127:
             return StructureResult(
                 passed=False,
                 violations=[],
                 summary_for_llm="[ENV] 구조 검사 명령을 찾을 수 없습니다.",
             )
-        except subprocess.TimeoutExpired:
+        if result.timed_out:
             return StructureResult(
                 passed=False,
                 violations=[],
                 summary_for_llm="구조 검사 실행 타임아웃 (120초)",
+            )
+        if result.error_message:
+            return StructureResult(
+                passed=False,
+                violations=[],
+                summary_for_llm=f"구조 검사 실행 실패: {result.error_message}",
             )
         output = (result.stdout + "\n" + result.stderr).strip()
         return StructureResult(

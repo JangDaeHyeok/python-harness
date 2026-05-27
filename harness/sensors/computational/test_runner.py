@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import re
 import shlex
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from harness.tools.shell import CommandResult, run_argv_safe
 
 
 @dataclass
@@ -67,23 +68,26 @@ class TestRunnerSensor:
         if coverage:
             cmd.extend(["--cov=.", "--cov-report=json:/dev/stdout"])
 
-        try:
-            result = subprocess.run(
-                cmd, cwd=str(self.project_dir),
-                capture_output=True, text=True, timeout=300,
-            )
-        except FileNotFoundError:
+        result = run_argv_safe(cmd, self.project_dir, timeout=300)
+        if result.returncode == 127:
             return TestResult(
                 passed=False, total=0, passed_count=0, failed_count=0,
                 error_count=0, skipped_count=0, test_cases=[],
                 coverage_percent=None,
                 summary_for_llm="[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요.",
             )
-        except subprocess.TimeoutExpired:
+        if result.timed_out:
             return TestResult(
                 passed=False, total=0, passed_count=0, failed_count=0,
                 error_count=0, skipped_count=0, test_cases=[],
                 coverage_percent=None, summary_for_llm="테스트 실행 타임아웃 (300초)",
+            )
+        if result.error_message:
+            return TestResult(
+                passed=False, total=0, passed_count=0, failed_count=0,
+                error_count=0, skipped_count=0, test_cases=[],
+                coverage_percent=None,
+                summary_for_llm=f"pytest 실행 실패: {result.error_message}",
             )
 
         if self._is_missing_pytest_module(result):
@@ -104,25 +108,27 @@ class TestRunnerSensor:
         effective_min_coverage = self.min_coverage if min_coverage is None else min_coverage
         cmd = self._build_simple_command(command or self.command, effective_coverage)
         effective_timeout = self.timeout if timeout is None else timeout
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(self.project_dir),
-                capture_output=True, text=True, timeout=effective_timeout,
-            )
-        except FileNotFoundError:
+        result = run_argv_safe(cmd, self.project_dir, timeout=effective_timeout)
+        if result.returncode == 127:
             return TestResult(
                 passed=False, total=0, passed_count=0, failed_count=0,
                 error_count=0, skipped_count=0, test_cases=[],
                 coverage_percent=None,
                 summary_for_llm="[ENV] pytest이(가) 설치되어 있지 않습니다. pip install pytest 후 다시 시도하세요.",
             )
-        except subprocess.TimeoutExpired:
+        if result.timed_out:
             return TestResult(
                 passed=False, total=0, passed_count=0, failed_count=0,
                 error_count=0, skipped_count=0, test_cases=[],
                 coverage_percent=None,
                 summary_for_llm=f"테스트 실행 타임아웃 ({effective_timeout}초)",
+            )
+        if result.error_message:
+            return TestResult(
+                passed=False, total=0, passed_count=0, failed_count=0,
+                error_count=0, skipped_count=0, test_cases=[],
+                coverage_percent=None,
+                summary_for_llm=f"pytest 실행 실패: {result.error_message}",
             )
 
         if self._is_missing_pytest_module(result):
@@ -140,7 +146,7 @@ class TestRunnerSensor:
         )
 
     def _is_missing_pytest_module(
-        self, result: subprocess.CompletedProcess[str]
+        self, result: CommandResult
     ) -> bool:
         output = result.stdout + "\n" + result.stderr
         return "No module named pytest" in output or "No module named 'pytest'" in output
@@ -157,7 +163,7 @@ class TestRunnerSensor:
             cmd.extend(["--cov=.", "--cov-report=term-missing"])
         return cmd
 
-    def _parse_pytest_output(self, result: subprocess.CompletedProcess[str]) -> TestResult:
+    def _parse_pytest_output(self, result: CommandResult) -> TestResult:
         """pytest JSON report 출력을 파싱한다."""
         test_cases: list[TestCase] = []
         coverage_percent: float | None = None
@@ -204,7 +210,7 @@ class TestRunnerSensor:
             ),
         )
 
-    def _parse_simple_output(self, result: subprocess.CompletedProcess[str]) -> TestResult:
+    def _parse_simple_output(self, result: CommandResult) -> TestResult:
         """pytest의 텍스트 출력을 간단히 파싱한다."""
         output = result.stdout + "\n" + result.stderr
         passed = result.returncode == 0

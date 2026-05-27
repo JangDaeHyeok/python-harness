@@ -7,9 +7,10 @@ Phase별 구현 시 에이전트가 정확한 스펙 변경점만 참조할 수 
 from __future__ import annotations
 
 import logging
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from harness.tools.shell import run_argv_safe
 
 logger = logging.getLogger(__name__)
 
@@ -105,21 +106,19 @@ class DocsDiffGenerator:
         return self.generate(base_ref=f"{ref}...HEAD")
 
     def _get_raw_diff(self, base_ref: str, docs_dir: str) -> str:
-        try:
-            result = subprocess.run(
-                ["git", "diff", base_ref, "--unified=0", "--", docs_dir],
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=_DIFF_TIMEOUT,
+        result = run_argv_safe(
+            ["git", "diff", base_ref, "--unified=0", "--", docs_dir],
+            self.project_dir,
+            timeout=_DIFF_TIMEOUT,
+        )
+        if not result.ok:
+            logger.warning(
+                "git diff 실패 (docs_dir=%s): %s",
+                docs_dir,
+                result.stderr.strip() or result.error_message,
             )
-            if result.returncode != 0:
-                logger.warning("git diff 실패 (docs_dir=%s): %s", docs_dir, result.stderr.strip())
-                return ""
-            return result.stdout
-        except (subprocess.SubprocessError, OSError) as e:
-            logger.warning("git diff 실행 실패: %s", e)
             return ""
+        return result.stdout
 
     def _get_untracked_file_diffs(
         self,
@@ -127,23 +126,17 @@ class DocsDiffGenerator:
         tracked_paths: set[str],
     ) -> list[FileDiff]:
         """git diff가 보여주지 않는 untracked 문서 파일을 추가 줄로 수집한다."""
-        try:
-            result = subprocess.run(
-                ["git", "ls-files", "--others", "--exclude-standard", "--", docs_dir],
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=_DIFF_TIMEOUT,
+        result = run_argv_safe(
+            ["git", "ls-files", "--others", "--exclude-standard", "--", docs_dir],
+            self.project_dir,
+            timeout=_DIFF_TIMEOUT,
+        )
+        if not result.ok:
+            logger.warning(
+                "untracked docs 조회 실패 (docs_dir=%s): %s",
+                docs_dir,
+                result.stderr.strip() or result.error_message,
             )
-            if result.returncode != 0:
-                logger.warning(
-                    "untracked docs 조회 실패 (docs_dir=%s): %s",
-                    docs_dir,
-                    result.stderr.strip(),
-                )
-                return []
-        except (subprocess.SubprocessError, OSError) as e:
-            logger.warning("untracked docs 조회 실행 실패: %s", e)
             return []
 
         diffs: list[FileDiff] = []
@@ -173,32 +166,22 @@ class DocsDiffGenerator:
         return diffs
 
     def _resolve_ref(self, branch: str) -> str:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", branch],
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                return branch
-        except (subprocess.SubprocessError, OSError):
-            pass
+        result = run_argv_safe(
+            ["git", "rev-parse", "--verify", branch],
+            self.project_dir,
+            timeout=10,
+        )
+        if result.ok:
+            return branch
 
         remote_ref = f"origin/{branch}"
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", remote_ref],
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                return remote_ref
-        except (subprocess.SubprocessError, OSError):
-            pass
+        result = run_argv_safe(
+            ["git", "rev-parse", "--verify", remote_ref],
+            self.project_dir,
+            timeout=10,
+        )
+        if result.ok:
+            return remote_ref
 
         return branch
 

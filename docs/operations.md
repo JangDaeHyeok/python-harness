@@ -69,6 +69,8 @@ pip install -e ".[dev]"
 - 기본 정책: 첫 Phase에서 문서가 업데이트되어 docs-diff가 생겨야 한다. 예외는 `--allow-empty-docs-diff`로 명시.
 - Phase 프롬프트에는 입력 파일, 변경 허용 범위, 기대 산출물, 검증 방법, 핸드오프 요구사항이 포함된다.
 - 각 Phase는 `.harness/tasks/sprint-{N}/{phase_id}-handoff.md`(20줄 이내)에 다음 Phase용 요약을 남긴다.
+- Phase 실행 후 handoff 파일이 없거나, 20줄을 초과하거나, `결정적 파이프라인 결과:` 라인이 없으면 해당 Phase는 failed가 된다.
+- Phase 실행 중 현재 Phase의 런타임 산출물과 `allowed_files` 범위 밖 파일이 새로 변경되면 failed가 되며 후속 Phase는 진행되지 않는다.
 - 재시도 시 완료되지 않은 Phase만 pending으로 되돌리고, done Phase는 재실행하지 않는다.
 - 자세한 동작은 `harness/context/CLAUDE.md`와 `docs/adr/0009-phase-execution-and-context-isolation.md`.
 

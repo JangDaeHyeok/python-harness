@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 
 from harness.tools.path_safety import DEFAULT_BRANCH_FALLBACK, sanitize_branch_name
+from harness.tools.shell import run_argv_safe
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,11 @@ __all__ = [
 def get_current_branch(project_dir: Path) -> str:
     """현재 git 브랜치 이름을 반환한다. 실패 시 fallback 이름을 반환한다."""
     cwd = Path(project_dir)  # normalize — justifies runtime import
-    try:
-        result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        branch = result.stdout.strip()
-        return branch if branch else FALLBACK_BRANCH
-    except (subprocess.SubprocessError, OSError):
+    result = run_argv_safe(["git", "branch", "--show-current"], cwd, timeout=10)
+    if not result.ok:
         return FALLBACK_BRANCH
+    branch = result.stdout.strip()
+    return branch if branch else FALLBACK_BRANCH
 
 
 class ReviewArtifactManager:

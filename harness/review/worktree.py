@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from harness.tools.shell import run_argv_safe
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -25,17 +26,9 @@ class WorktreeError(RuntimeError):
 
 def _run_git(args: list[str], cwd: Path, timeout: int = 30) -> tuple[int, str, str]:
     """git 명령을 실행하고 (returncode, stdout, stderr)를 반환한다."""
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return result.returncode, result.stdout.strip(), result.stderr.strip()
-    except Exception as e:
-        return -1, "", str(e)
+    result = run_argv_safe(["git", *args], cwd, timeout=timeout)
+    stderr = result.stderr.strip() or result.error_message
+    return result.returncode, result.stdout.strip(), stderr
 
 
 def is_git_repository(project_dir: Path) -> bool:

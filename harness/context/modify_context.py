@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from harness.tools.adr import ADRLoader
 from harness.tools.path_safety import sanitize_branch_name
+from harness.tools.shell import run_argv_safe
 
 if TYPE_CHECKING:
     from harness.context.project_policy import ProjectPolicy
@@ -218,32 +218,21 @@ class ModifyContextCollector:
         return "\n\n".join(parts) if parts else ""
 
     def _run_git(self, *args: str) -> str:
-        try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=_COLLECT_TIMEOUT,
-            )
-            return result.stdout.strip()
-        except (subprocess.SubprocessError, OSError) as e:
-            logger.warning("git 명령 실행 실패 (%s): %s", " ".join(args), e)
+        result = run_argv_safe(["git", *args], self.project_dir, timeout=_COLLECT_TIMEOUT)
+        if result.error_message:
+            logger.warning("git 명령 실행 실패 (%s): %s", " ".join(args), result.error_message)
             return ""
+        if result.returncode != 0:
+            logger.warning("git 명령 실패 (%s): %s", " ".join(args), result.stderr.strip())
+            return ""
+        return result.stdout.strip()
 
     def _run_cmd(self, *args: str) -> str | None:
-        try:
-            result = subprocess.run(
-                list(args),
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=_COLLECT_TIMEOUT,
-            )
-            return result.stdout.strip() + result.stderr.strip()
-        except (subprocess.SubprocessError, OSError) as e:
-            logger.warning("명령 실행 실패 (%s): %s", " ".join(args), e)
+        result = run_argv_safe(list(args), self.project_dir, timeout=_COLLECT_TIMEOUT)
+        if result.error_message:
+            logger.warning("명령 실행 실패 (%s): %s", " ".join(args), result.error_message)
             return None
+        return result.stdout.strip() + result.stderr.strip()
 
     def _read_file_safe(self, path: Path) -> str:
         if not path.exists():

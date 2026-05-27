@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from harness.tools.shell import CommandResult, run_argv_safe
 
 
 @dataclass
@@ -41,27 +42,22 @@ class TypeCheckerSensor:
         for option in ["--no-color-output", "--show-error-codes", "--no-error-summary"]:
             if option not in cmd:
                 cmd.append(option)
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        except FileNotFoundError:
+        result = run_argv_safe(cmd, self.project_dir, timeout=120)
+        if result.returncode == 127:
             return TypeCheckResult(
                 False,
                 1,
                 [],
                 "[ENV] mypy이(가) 설치되어 있지 않습니다. pip install mypy 후 다시 시도하세요.",
             )
-        except subprocess.TimeoutExpired:
+        if result.timed_out:
             return TypeCheckResult(False, 0, [], "mypy 실행 타임아웃 (120초)")
+        if result.error_message:
+            return TypeCheckResult(False, 1, [], f"mypy 실행 실패: {result.error_message}")
 
         return self._parse_mypy_output(result)
 
-    def _parse_mypy_output(self, result: subprocess.CompletedProcess[str]) -> TypeCheckResult:
+    def _parse_mypy_output(self, result: CommandResult) -> TypeCheckResult:
         issues: list[TypeIssue] = []
         output = result.stdout + result.stderr
 

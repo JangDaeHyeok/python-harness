@@ -310,3 +310,7 @@ GitHub review thread resolve는 REST API 제약으로 답글 기반 확인으로
 | 0007 | 가이드 레지스트리 | 시스템 프롬프트/컨텍스트 중앙 관리 |
 | 0008 | 수정 모드와 프로젝트 정책 | modify 구현, project-policy.yaml 정책 적용 |
 | 0009 | Phase 실행과 컨텍스트 격리 | docs-diff, Phase 분할, 컨텍스트 필터, 헤드리스 실행, PR 자동화 |
+| 0010 | 외부 프로젝트 고정 구조 강제 | bootstrap 구조 규칙과 package 정책 검증 |
+| 0011 | harness-init 마이그레이션 모드 | 기존 프로젝트 규칙 파일 안전 배포 |
+| 0012 | 결정적 파이프라인 평가 게이트 | ruff/mypy/구조/pytest 결과가 최종 평가를 게이트 |
+| 0013 | argv 명령 경계와 Phase 완료 게이트 | 외부 명령 공통 안전 실행, Phase handoff/범위 위반 실패 처리 |

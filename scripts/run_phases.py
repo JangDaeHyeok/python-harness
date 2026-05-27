@@ -11,9 +11,10 @@ claude --print 모드로 Phase별 독립 세션을 순차 실행한다.
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import logging
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.context.phase_manager import PhaseManager, PhaseStatus
 from harness.review.docs_diff import DocsDiffGenerator
+from harness.tools.shell import run_argv_safe
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +37,9 @@ class PhaseExecutionError(RuntimeError):
 
 def _find_claude_cmd() -> str:
     """claude CLI가 설치되어 있는지 확인한다."""
-    try:
-        result = subprocess.run(
-            ["which", _CLAUDE_CMD],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return _CLAUDE_CMD
-    except (subprocess.SubprocessError, OSError):
-        pass
+    result = run_argv_safe(["which", _CLAUDE_CMD], Path.cwd(), timeout=10)
+    if result.ok:
+        return _CLAUDE_CMD
     return _CLAUDE_CMD
 
 
@@ -61,24 +57,17 @@ def execute_phase_headless(
         PhaseExecutionError: 실행 실패 시.
     """
     cmd = _find_claude_cmd()
-    try:
-        result = subprocess.run(
-            [cmd, "--print", "-p", prompt],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() or f"exit code {result.returncode}"
-            raise PhaseExecutionError(f"claude --print 실패: {error_msg}")
-        return result.stdout
-    except subprocess.TimeoutExpired as e:
-        raise PhaseExecutionError(f"Phase 실행 타임아웃 ({timeout}초)") from e
-    except FileNotFoundError as e:
+    result = run_argv_safe([cmd, "--print", "-p", prompt], project_dir, timeout=timeout)
+    if result.returncode == 127:
         raise PhaseExecutionError(
             "claude CLI를 찾을 수 없습니다. Claude Code가 설치되어 있는지 확인하세요."
-        ) from e
+        )
+    if result.timed_out:
+        raise PhaseExecutionError(f"Phase 실행 타임아웃 ({timeout}초)")
+    if not result.ok:
+        error_msg = result.stderr.strip() or result.error_message or f"exit code {result.returncode}"
+        raise PhaseExecutionError(f"claude --print 실패: {error_msg}")
+    return result.stdout
 
 
 def run_sprint_phases(
@@ -141,6 +130,7 @@ def run_sprint_phases(
 
             start = time.time()
             try:
+                before_snapshot = _snapshot_worktree_changes(project_dir)
                 output = execute_phase_headless(prompt, project_dir, timeout=timeout)
                 elapsed = time.time() - start
                 logger.info(
@@ -168,6 +158,13 @@ def run_sprint_phases(
                             "문서 업데이트가 필요한 작업이면 docs/ 문서를 먼저 수정하세요."
                         )
 
+                _validate_phase_completion(
+                    project_dir=project_dir,
+                    sprint_number=sprint_number,
+                    phase_id=phase.phase_id,
+                    allowed_files=[str(item) for item in phase.allowed_files],
+                    before_snapshot=before_snapshot,
+                )
                 results[phase.phase_id] = PhaseStatus.DONE.value
                 mgr.update_phase_status(sprint_number, phase.phase_id, PhaseStatus.DONE)
 
@@ -180,6 +177,115 @@ def run_sprint_phases(
                 mgr.update_phase_status(sprint_number, phase.phase_id, PhaseStatus.FAILED)
 
     return results
+
+
+def _validate_phase_completion(
+    *,
+    project_dir: Path,
+    sprint_number: int,
+    phase_id: str,
+    allowed_files: list[str],
+    before_snapshot: dict[str, str],
+) -> None:
+    """Phase 완료 산출물과 변경 범위를 검증한다."""
+    sprint_dir = project_dir / ".harness" / "tasks" / f"sprint-{sprint_number}"
+    handoff_path = sprint_dir / f"{phase_id}-handoff.md"
+    if not handoff_path.exists():
+        raise PhaseExecutionError(f"Phase handoff 파일이 없습니다: {handoff_path}")
+
+    handoff_lines = handoff_path.read_text(encoding="utf-8").splitlines()
+    if len(handoff_lines) > 20:
+        raise PhaseExecutionError(
+            f"Phase handoff가 20줄을 초과했습니다: {len(handoff_lines)}줄"
+        )
+    if not any(line.startswith("결정적 파이프라인 결과:") for line in handoff_lines):
+        raise PhaseExecutionError(
+            "Phase handoff에 `결정적 파이프라인 결과:` 라인이 없습니다."
+        )
+
+    changed_paths = _paths_changed_since(project_dir, before_snapshot)
+    runtime_allowed = {
+        f".harness/tasks/sprint-{sprint_number}/{phase_id}-output.md",
+        f".harness/tasks/sprint-{sprint_number}/{phase_id}-handoff.md",
+    }
+    outside_allowed = sorted(
+        path for path in changed_paths
+        if path not in runtime_allowed and not _is_allowed_path(path, allowed_files)
+    )
+    if outside_allowed:
+        joined = ", ".join(outside_allowed[:20])
+        raise PhaseExecutionError(f"Phase 허용 범위 밖 파일이 변경되었습니다: {joined}")
+
+
+def _snapshot_worktree_changes(project_dir: Path) -> dict[str, str]:
+    """현재 git 변경 파일의 내용 지문을 수집한다."""
+    result = run_argv_safe(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        project_dir,
+        timeout=30,
+    )
+    if not result.ok:
+        logger.warning("git status 실패, Phase 변경 범위 검증 스냅샷을 비움: %s", result.stderr)
+        return {}
+    return {path: _fingerprint_path(project_dir / path) for path in _parse_status_paths(result.stdout)}
+
+
+def _paths_changed_since(project_dir: Path, before_snapshot: dict[str, str]) -> set[str]:
+    after_snapshot = _snapshot_worktree_changes(project_dir)
+    changed: set[str] = set()
+    for path, fingerprint in after_snapshot.items():
+        if before_snapshot.get(path) != fingerprint:
+            changed.add(path)
+    for path in before_snapshot:
+        if path not in after_snapshot:
+            changed.add(path)
+    return changed
+
+
+def _parse_status_paths(raw_status: str) -> list[str]:
+    paths: list[str] = []
+    records = raw_status.split("\0")
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        status = record[:2]
+        path = record[3:]
+        if path:
+            paths.append(path)
+        if status[0] in {"R", "C"} and index < len(records):
+            index += 1
+    return paths
+
+
+def _fingerprint_path(path: Path) -> str:
+    if not path.exists():
+        return "<missing>"
+    if not path.is_file():
+        return "<non-file>"
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return "<unreadable>"
+    return digest.hexdigest()
+
+
+def _is_allowed_path(path: str, allowed_files: list[str]) -> bool:
+    rel = path.replace("\\", "/")
+    for pattern in allowed_files:
+        normalized = pattern.replace("\\", "/")
+        if normalized.endswith("/**"):
+            prefix = normalized[:-3].rstrip("/")
+            if rel == prefix or rel.startswith(f"{prefix}/"):
+                return True
+        if fnmatch.fnmatch(rel, normalized):
+            return True
+    return False
 
 
 def _is_docs_update_phase(phase_id: str) -> bool:

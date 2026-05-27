@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import re
 import shlex
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
+
+from harness.tools.shell import run_argv_safe
 
 
 @dataclass
@@ -60,16 +61,8 @@ class LinterSensor:
         cmd = shlex.split(command)
         if "--output-format" not in cmd:
             cmd.extend(["--output-format", "json"])
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            return self._parse_ruff_json(result.stdout)
-        except FileNotFoundError:
+        result = run_argv_safe(cmd, self.project_dir, timeout=60)
+        if result.returncode == 127:
             return LintResult(
                 False,
                 1,
@@ -77,8 +70,11 @@ class LinterSensor:
                 [],
                 "[ENV] ruff이(가) 설치되어 있지 않습니다. pip install ruff 후 다시 시도하세요.",
             )
-        except subprocess.TimeoutExpired:
+        if result.timed_out:
             return LintResult(False, 0, 0, [], "Ruff 실행 타임아웃 (60초)")
+        if result.error_message:
+            return LintResult(False, 1, 0, [], f"Ruff 실행 실패: {result.error_message}")
+        return self._parse_ruff_json(result.stdout)
 
     def run_custom_rules(self) -> LintResult:
         """프로젝트별 커스텀 아키텍처 규칙을 검사한다."""
