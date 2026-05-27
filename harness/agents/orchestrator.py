@@ -118,7 +118,9 @@ class HarnessOrchestrator:
         self._docs_diff_gen = DocsDiffGenerator(self.project_dir)
         self._context_filter = ContextFilter(self.project_dir)
         self._session_fork_mgr = SessionForkManager(self.project_dir)
-        self._pipeline = HarnessPipeline(str(self.project_dir))
+        self._pipeline = HarnessPipeline(
+            str(self.project_dir), policy=self._policy_mgr.load()
+        )
 
     def run(
         self, user_prompt: str, *, resume_run_id: str = ""

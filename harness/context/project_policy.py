@@ -21,6 +21,16 @@ DEFAULT_POLICY_PATH = Path(".harness") / POLICY_FILENAME
 
 
 @dataclass
+class ValidationCommands:
+    """Python 검증 명령 설정."""
+
+    lint: str = "ruff check ."
+    type: str = "mypy harness"
+    test: str = "pytest"
+    structure: str = "python scripts/check_structure.py"
+
+
+@dataclass
 class ProjectPolicy:
     """프로젝트 정책 데이터."""
 
@@ -45,7 +55,12 @@ class ProjectPolicy:
         "coderabbit": False,
     })
     external_adr_sources: list[str] = field(default_factory=list)
-    custom_rules: dict[str, Any] = field(default_factory=dict)
+    commands: ValidationCommands = field(default_factory=ValidationCommands)
+    min_coverage: float | None = None
+    package_manager: str = "pip"
+    pytest_timeout: int = 300
+    pytest_coverage: bool = False
+    custom_rules: list[dict[str, Any]] = field(default_factory=list)
 
     def to_yaml(self) -> str:
         """정책을 YAML 문자열로 변환한다."""
@@ -63,6 +78,18 @@ class ProjectPolicy:
                 "structure": {"source": self.structure_source},
                 "artifacts": self.artifacts_enabled,
                 "review_tools": self.review_tools,
+                "commands": {
+                    "lint": self.commands.lint,
+                    "type": self.commands.type,
+                    "test": self.commands.test,
+                    "structure": self.commands.structure,
+                },
+                "min_coverage": self.min_coverage,
+                "package_manager": self.package_manager,
+                "pytest": {
+                    "timeout": self.pytest_timeout,
+                    "coverage": self.pytest_coverage,
+                },
             },
         }
         if self.python_version:
@@ -79,6 +106,8 @@ class ProjectPolicy:
         conventions = policies.get("conventions", {})
         adr = policies.get("adr", {})
         structure = policies.get("structure", {})
+        commands = policies.get("commands", {})
+        pytest_policy = policies.get("pytest", {})
 
         return cls(
             project_name=str(project.get("name", "")),
@@ -98,7 +127,17 @@ class ProjectPolicy:
                 "pr_body": True,
             })),
             review_tools=dict(policies.get("review_tools", {"coderabbit": False})),
-            custom_rules=dict(policies.get("custom_rules", {})),
+            commands=ValidationCommands(
+                lint=str(commands.get("lint", "ruff check .")),
+                type=str(commands.get("type", "mypy harness")),
+                test=str(commands.get("test", "pytest")),
+                structure=str(commands.get("structure", "python scripts/check_structure.py")),
+            ),
+            min_coverage=_optional_float(policies.get("min_coverage")),
+            package_manager=str(policies.get("package_manager", "pip")),
+            pytest_timeout=_positive_int(pytest_policy.get("timeout"), 300),
+            pytest_coverage=bool(pytest_policy.get("coverage", False)),
+            custom_rules=_normalize_custom_rules(policies.get("custom_rules", [])),
         )
 
 
@@ -167,3 +206,27 @@ class ProjectPolicyManager:
     def invalidate_cache(self) -> None:
         """캐시를 무효화한다."""
         self._cached = None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _normalize_custom_rules(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        rules = value.get("rules")
+        if isinstance(rules, list):
+            return [dict(item) for item in rules if isinstance(item, dict)]
+    return []

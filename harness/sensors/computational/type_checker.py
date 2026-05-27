@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,11 +35,15 @@ class TypeCheckerSensor:
     def __init__(self, project_dir: str) -> None:
         self.project_dir = Path(project_dir)
 
-    def run_mypy(self, target: str = ".") -> TypeCheckResult:
+    def run_mypy(self, target: str = ".", command: str | None = None) -> TypeCheckResult:
         """mypy를 실행하고 결과를 구조화한다."""
+        cmd = shlex.split(command) if command else ["mypy", target]
+        for option in ["--no-color-output", "--show-error-codes", "--no-error-summary"]:
+            if option not in cmd:
+                cmd.append(option)
         try:
             result = subprocess.run(
-                ["mypy", target, "--no-color-output", "--show-error-codes", "--no-error-summary"],
+                cmd,
                 cwd=str(self.project_dir),
                 capture_output=True,
                 text=True,

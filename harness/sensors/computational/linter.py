@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,11 +55,14 @@ class LinterSensor:
         self.project_dir = Path(project_dir)
         self.custom_rules = custom_rules or []
 
-    def run_ruff(self) -> LintResult:
+    def run_ruff(self, command: str = "ruff check .") -> LintResult:
         """Ruff (Python 린터)를 실행하고 결과를 구조화한다."""
+        cmd = shlex.split(command)
+        if "--output-format" not in cmd:
+            cmd.extend(["--output-format", "json"])
         try:
             result = subprocess.run(
-                ["ruff", "check", ".", "--output-format", "json"],
+                cmd,
                 cwd=str(self.project_dir),
                 capture_output=True,
                 text=True,
@@ -81,16 +85,21 @@ class LinterSensor:
         issues: list[LintIssue] = []
 
         for rule in self.custom_rules:
-            if rule["type"] == "forbidden_import":
+            rule_type = rule.get("type")
+            if rule_type == "forbidden_import":
                 issues.extend(
                     self._check_forbidden_import(
-                        rule["pattern"], rule["allowed_dirs"], rule["message"]
+                        str(rule.get("pattern", "")),
+                        list(rule.get("allowed_dirs", [])),
+                        str(rule.get("message", "금지된 import 패턴입니다.")),
                     )
                 )
-            elif rule["type"] == "file_location":
+            elif rule_type == "file_location":
                 issues.extend(
                     self._check_file_location(
-                        rule["pattern"], rule["required_dir"], rule["message"]
+                        str(rule.get("pattern", "")),
+                        str(rule.get("required_dir", "")),
+                        str(rule.get("message", "파일 위치 규칙 위반입니다.")),
                     )
                 )
 
@@ -104,9 +113,9 @@ class LinterSensor:
             summary_for_llm=self._build_summary(issues),
         )
 
-    def run_all(self) -> LintResult:
+    def run_all(self, command: str = "ruff check .") -> LintResult:
         """Ruff + 커스텀 규칙을 모두 실행한다."""
-        ruff_result = self.run_ruff()
+        ruff_result = self.run_ruff(command)
         custom_result = self.run_custom_rules()
 
         all_issues = ruff_result.issues + custom_result.issues

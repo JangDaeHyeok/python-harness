@@ -145,3 +145,31 @@ def test_test_runner_simple_uses_current_python_for_pytest(tmp_path: Path) -> No
         sensor.run_pytest_simple()
 
     assert run.call_args.args[0][0] == sys.executable
+
+
+def test_test_runner_fails_when_coverage_below_policy(tmp_path: Path) -> None:
+    sensor = PytestRunnerSensor(str(tmp_path), min_coverage=90)
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout="TOTAL      10      2    80%\n",
+        stderr="",
+    )
+
+    with patch("subprocess.run", return_value=completed):
+        result = sensor.run_pytest_simple()
+
+    assert not result.passed
+    assert result.coverage_percent == 80
+    assert "커버리지 기준 미달" in result.summary_for_llm
+
+
+def test_test_runner_uses_configured_command_and_timeout(tmp_path: Path) -> None:
+    sensor = PytestRunnerSensor(str(tmp_path), command="pytest -q", timeout=12)
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    with patch("subprocess.run", return_value=completed) as run:
+        sensor.run_pytest_simple()
+
+    assert run.call_args.args[0][:4] == [sys.executable, "-m", "pytest", "-q"]
+    assert run.call_args.kwargs["timeout"] == 12

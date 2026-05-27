@@ -108,8 +108,13 @@ pip install -e ".[dev]"
 ## 6. 프로젝트 정책 파일(`.harness/project-policy.yaml`)
 - 파일이 없거나 파싱 실패 시 기본 정책 사용.
 - 기본 필수 검사: `ruff`, `mypy`, `pytest`, `structure`.
+- Python 검증 설정 예시:
+  `commands.lint: ruff check .`, `commands.type: mypy harness`,
+  `commands.test: pytest`, `commands.structure: python scripts/check_structure.py`,
+  `min_coverage: 80`, `package_manager: pip`,
+  `pytest: {timeout: 300, coverage: true}`.
 - 기본 문서 경로: `docs/code-convention.yaml`, `docs/adr/`, `harness_structure.yaml`.
-- `custom_rules`는 Planner와 Evaluator가 참고하는 프로젝트별 판단 기준.
+- `custom_rules`는 `type`, `pattern`, `message` 등을 가진 목록이며 LinterSensor까지 전달된다.
 - `adr.external_sources`로 외부 프로젝트 ADR 디렉터리 지정 가능. 존재하지 않거나 디렉터리가 아니면 건너뜀(오류 없음).
 - 외부 ADR은 modify 컨텍스트, GuideRegistry, ContextFilter 모두에 반영.
 - 정책 파일에는 토큰·비밀값·개인 계정 정보를 넣지 않는다.

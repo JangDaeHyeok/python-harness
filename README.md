@@ -1051,8 +1051,21 @@ policies:
     code_quality_guide: true
     review_comments: true
     pr_body: true
-  custom_rules: |
-    프로젝트별 암묵지, 금지사항, 검증 규칙을 자유 형식으로 적는다.
+  commands:
+    lint: ruff check .
+    type: mypy my_app
+    test: pytest
+    structure: python scripts/check_structure.py
+  min_coverage: 80
+  package_manager: pip
+  pytest:
+    timeout: 300
+    coverage: true
+  custom_rules:
+    - type: forbidden_import
+      pattern: "from my_app.internal"
+      allowed_dirs: ["my_app/"]
+      message: "internal 모듈은 패키지 내부에서만 import한다."
 ```
 
 정책 파일에는 토큰·비밀값을 넣지 않는다.

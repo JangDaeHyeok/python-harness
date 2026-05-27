@@ -179,6 +179,17 @@ policies:
     pr_body: true
   review_tools:
     coderabbit: false
+  commands:
+    lint: ruff check .
+    type: mypy {package}
+    test: pytest
+    structure: python scripts/check_structure.py
+  min_coverage:
+  package_manager: pip
+  pytest:
+    timeout: 300
+    coverage: false
+  custom_rules: []
 """
 
 _CODERABBIT_TEMPLATE = """\

@@ -20,6 +20,14 @@ class TestProjectPolicy:
         assert "pytest" in policy.required_checks
         assert "structure" in policy.required_checks
         assert policy.review_tools == {"coderabbit": False}
+        assert policy.commands.lint == "ruff check ."
+        assert policy.commands.type == "mypy harness"
+        assert policy.commands.test == "pytest"
+        assert policy.commands.structure == "python scripts/check_structure.py"
+        assert policy.min_coverage is None
+        assert policy.package_manager == "pip"
+        assert policy.pytest_timeout == 300
+        assert policy.pytest_coverage is False
 
     def test_to_yaml_and_back(self) -> None:
         policy = ProjectPolicy(
@@ -49,7 +57,23 @@ class TestProjectPolicy:
                 "structure": {"source": "rules.yaml"},
                 "artifacts": {"design_intent": False},
                 "review_tools": {"coderabbit": True},
-                "custom_rules": {"max_complexity": 10},
+                "commands": {
+                    "lint": "ruff check src",
+                    "type": "mypy src",
+                    "test": "pytest -q",
+                    "structure": "python scripts/check_structure.py",
+                },
+                "min_coverage": 85,
+                "package_manager": "uv",
+                "pytest": {"timeout": 120, "coverage": True},
+                "custom_rules": [
+                    {
+                        "type": "forbidden_import",
+                        "pattern": "import os",
+                        "allowed_dirs": ["scripts/"],
+                        "message": "os import 제한",
+                    }
+                ],
             },
         }
         policy = ProjectPolicy.from_dict(data)
@@ -60,7 +84,14 @@ class TestProjectPolicy:
         assert policy.conventions_source == "custom.yaml"
         assert policy.adr_directory == "adrs/"
         assert policy.review_tools == {"coderabbit": True}
-        assert policy.custom_rules == {"max_complexity": 10}
+        assert policy.commands.lint == "ruff check src"
+        assert policy.commands.type == "mypy src"
+        assert policy.commands.test == "pytest -q"
+        assert policy.min_coverage == 85
+        assert policy.package_manager == "uv"
+        assert policy.pytest_timeout == 120
+        assert policy.pytest_coverage is True
+        assert policy.custom_rules[0]["type"] == "forbidden_import"
 
     def test_from_dict_with_defaults(self) -> None:
         policy = ProjectPolicy.from_dict({})

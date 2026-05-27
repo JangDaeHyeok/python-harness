@@ -22,3 +22,13 @@ policies:
     code_quality_guide: true
     review_comments: true
     pr_body: true
+  commands:
+    lint: ruff check .
+    type: mypy harness
+    test: pytest
+    structure: python scripts/check_structure.py
+  min_coverage:
+  package_manager: pip
+  pytest:
+    timeout: 300
+    coverage: false
