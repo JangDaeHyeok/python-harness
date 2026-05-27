@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,27 @@ _COLLECT_TIMEOUT = 30
 _DIFF_PREVIEW_LIMIT = 5000
 _CONVENTION_PREVIEW_LIMIT = 3000
 _STRUCTURE_PREVIEW_LIMIT = 2000
+_DEPENDENCY_FILE_LIMIT = 120_000
+_SOURCE_SCAN_LIMIT = 200
+_SOURCE_FILE_LIMIT = 200_000
+
+_PROJECT_MARKERS = (
+    "pyproject.toml",
+    "setup.py",
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile",
+)
+
+_LIBRARY_ALIASES = {
+    "requests": "requests",
+    "httpx": "httpx",
+    "click": "click",
+    "typer": "typer",
+    "pytest": "pytest",
+    "unittest": "unittest",
+    "argparse": "argparse",
+}
 
 
 def _truncate_with_notice(text: str, limit: int) -> str:
@@ -46,6 +68,7 @@ class ModifyContext:
     structure_rules: str = ""
     recent_test_summary: str = ""
     project_policy: str = ""
+    python_project_summary: str = ""
 
     def to_markdown(self) -> str:
         """수집된 컨텍스트를 마크다운으로 변환한다."""
@@ -92,6 +115,9 @@ class ModifyContext:
 
         if self.project_policy:
             sections.append(f"## 프로젝트 정책\n\n```yaml\n{self.project_policy}\n```\n")
+
+        if self.python_project_summary:
+            sections.append(f"## Python 프로젝트 감지 요약\n\n{self.python_project_summary}\n")
 
         return "\n".join(sections)
 
@@ -142,6 +168,7 @@ class ModifyContextCollector:
             project_policy=self._read_file_safe(
                 self.project_dir / ".harness" / "project-policy.yaml"
             ),
+            python_project_summary=self._collect_python_project_summary(),
         )
         logger.info(
             "수정 컨텍스트 수집 완료: branch=%s, changed_files=%d, adrs=%d",
@@ -216,6 +243,204 @@ class ModifyContextCollector:
         if mypy is not None:
             parts.append(f"### Mypy\n{mypy or '에러 없음'}")
         return "\n\n".join(parts) if parts else ""
+
+    def _collect_python_project_summary(self) -> str:
+        files = self._detect_project_files()
+        dependencies = self._collect_dependency_names()
+        imports = self._collect_import_names()
+        libraries = self._detect_library_hints(dependencies, imports)
+        lines = [
+            f"- 프로젝트 파일: {', '.join(files) if files else '감지 없음'}",
+            f"- package_manager: {self._detect_package_manager(files)}",
+            f"- layout: {self._detect_layout()}",
+            f"- 주요 라이브러리 힌트: {', '.join(libraries) if libraries else '감지 없음'}",
+        ]
+        recent_commits = self._get_recent_commit_messages()
+        if recent_commits:
+            lines.append("- 최근 커밋 메시지:")
+            lines.extend(f"  - {message}" for message in recent_commits)
+        return "\n".join(lines)
+
+    def _detect_project_files(self) -> list[str]:
+        files = [name for name in _PROJECT_MARKERS if (self.project_dir / name).exists()]
+        files.extend(
+            sorted(path.name for path in self.project_dir.glob("requirements*.txt"))
+        )
+        return files
+
+    def _detect_package_manager(self, files: list[str]) -> str:
+        if "uv.lock" in files:
+            return "uv"
+        if "poetry.lock" in files or self._pyproject_has_poetry():
+            return "poetry"
+        if "Pipfile" in files:
+            return "pipenv"
+        if any(name.startswith("requirements") and name.endswith(".txt") for name in files):
+            return "pip"
+        if "pyproject.toml" in files:
+            return "pyproject"
+        if "setup.py" in files:
+            return "setuptools"
+        return "unknown"
+
+    def _detect_layout(self) -> str:
+        src_dir = self.project_dir / "src"
+        if src_dir.exists() and any(src_dir.glob("*/__init__.py")):
+            return "src"
+        flat_packages = [
+            path.name
+            for path in self.project_dir.iterdir()
+            if path.is_dir()
+            and not path.name.startswith(".")
+            and path.name not in {"build", "dist", "docs", "src", "tests"}
+            and (path / "__init__.py").exists()
+        ]
+        if flat_packages:
+            return f"flat ({', '.join(sorted(flat_packages)[:5])})"
+        return "unknown"
+
+    def _collect_dependency_names(self) -> set[str]:
+        names: set[str] = set()
+        names.update(self._dependencies_from_pyproject())
+        for path in sorted(self.project_dir.glob("requirements*.txt")):
+            names.update(self._dependencies_from_requirements(path))
+        return names
+
+    def _dependencies_from_pyproject(self) -> set[str]:
+        path = self.project_dir / "pyproject.toml"
+        if not path.exists() or path.stat().st_size > _DEPENDENCY_FILE_LIMIT:
+            return set()
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            logger.warning("pyproject.toml 요약 읽기 실패: %s", e)
+            return set()
+
+        raw_dependencies: list[object] = []
+        project = data.get("project")
+        if isinstance(project, dict):
+            dependencies = project.get("dependencies")
+            if isinstance(dependencies, list):
+                raw_dependencies.extend(dependencies)
+            optional = project.get("optional-dependencies")
+            if isinstance(optional, dict):
+                for group in optional.values():
+                    if isinstance(group, list):
+                        raw_dependencies.extend(group)
+
+        tool = data.get("tool")
+        if isinstance(tool, dict):
+            poetry = tool.get("poetry")
+            if isinstance(poetry, dict):
+                dependencies = poetry.get("dependencies")
+                if isinstance(dependencies, dict):
+                    raw_dependencies.extend(self._poetry_dependency_specs(dependencies))
+                groups = poetry.get("group")
+                if isinstance(groups, dict):
+                    for group in groups.values():
+                        if isinstance(group, dict):
+                            group_dependencies = group.get("dependencies")
+                            if isinstance(group_dependencies, dict):
+                                raw_dependencies.extend(
+                                    self._poetry_dependency_specs(group_dependencies)
+                                )
+
+        return {self._normalize_dependency(str(dep)) for dep in raw_dependencies if dep}
+
+    def _dependencies_from_requirements(self, path: Path) -> set[str]:
+        if path.stat().st_size > _DEPENDENCY_FILE_LIMIT:
+            return set()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as e:
+            logger.warning("requirements 요약 읽기 실패 (%s): %s", path, e)
+            return set()
+        return {
+            self._normalize_dependency(line)
+            for line in lines
+            if line.strip() and not line.lstrip().startswith(("#", "-"))
+        }
+
+    def _poetry_dependency_specs(self, dependencies: dict[object, object]) -> list[str]:
+        specs: list[str] = []
+        for name, version in dependencies.items():
+            if not isinstance(name, str) or name.lower() == "python":
+                continue
+            if isinstance(version, str):
+                specs.append(f"{name}{version}")
+            else:
+                specs.append(name)
+        return specs
+
+    def _collect_import_names(self) -> set[str]:
+        imports: set[str] = set()
+        scanned = 0
+        for path in self.project_dir.rglob("*.py"):
+            if scanned >= _SOURCE_SCAN_LIMIT:
+                break
+            if any(part in {".git", ".venv", "__pycache__", "build", "dist"} for part in path.parts):
+                continue
+            if path.stat().st_size > _SOURCE_FILE_LIMIT:
+                continue
+            scanned += 1
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            imports.update(re.findall(r"^\s*(?:from|import)\s+([a-zA-Z_][\w]*)", content, re.MULTILINE))
+            if "pydantic.v1" in content:
+                imports.add("pydantic.v1")
+        return imports
+
+    def _detect_library_hints(self, dependencies: set[str], imports: set[str]) -> list[str]:
+        normalized = {name.lower() for name in dependencies | imports}
+        hints: list[str] = []
+        pydantic_hint = self._detect_pydantic_version(normalized)
+        if pydantic_hint:
+            hints.append(pydantic_hint)
+        for raw, label in _LIBRARY_ALIASES.items():
+            if raw in normalized:
+                hints.append(label)
+        return sorted(dict.fromkeys(hints))
+
+    def _detect_pydantic_version(self, names: set[str]) -> str:
+        if "pydantic.v1" in names:
+            return "pydantic v1"
+        if any(name.startswith("pydantic<2") or name.startswith("pydantic = <2") for name in names):
+            return "pydantic v1"
+        if any(
+            name.startswith(("pydantic>=2", "pydantic^2", "pydantic~=2"))
+            or name.startswith("pydantic = ^2")
+            for name in names
+        ):
+            return "pydantic v2"
+        if "pydantic" in names:
+            return "pydantic"
+        return ""
+
+    def _normalize_dependency(self, value: str) -> str:
+        stripped = value.strip().strip("'\"")
+        if not stripped:
+            return ""
+        lower = stripped.lower()
+        if lower.startswith("pydantic"):
+            return re.split(r"\s|;", lower, maxsplit=1)[0]
+        return re.split(r"\s|[<>=!~;\[]", stripped, maxsplit=1)[0].lower()
+
+    def _pyproject_has_poetry(self) -> bool:
+        path = self.project_dir / "pyproject.toml"
+        if not path.exists() or path.stat().st_size > _DEPENDENCY_FILE_LIMIT:
+            return False
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            return False
+        tool = data.get("tool")
+        return isinstance(tool, dict) and isinstance(tool.get("poetry"), dict)
+
+    def _get_recent_commit_messages(self) -> list[str]:
+        output = self._run_git("log", "-5", "--pretty=format:%s")
+        return [line.strip() for line in output.splitlines() if line.strip()][:5]
 
     def _run_git(self, *args: str) -> str:
         result = run_argv_safe(["git", *args], self.project_dir, timeout=_COLLECT_TIMEOUT)

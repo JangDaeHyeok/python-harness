@@ -13,7 +13,9 @@ from scripts.auto_pr_pipeline import (
     ReviewDecision,
     build_review_decision_markdown,
     classify_review_comment,
+    commit_review_changes,
     filter_actionable_comments,
+    get_existing_pr,
     post_review_replies,
     run_pipeline,
 )
@@ -62,16 +64,16 @@ class TestReviewComment:
 class TestReviewClassification:
     def test_classifies_actionable_keyword(self) -> None:
         comment = classify_review_comment(
-            ReviewComment(body="이 null 오류는 fix 해야 합니다", path="a.py", line=10)
+            ReviewComment(body="이 타입 에러는 필수 동작 실패입니다", path="a.py", line=10)
         )
         assert comment.decision == ReviewDecision.ACCEPT
         assert "키워드" in comment.reason
 
-    def test_classifies_inline_comment_as_actionable(self) -> None:
+    def test_defers_inline_comment_without_clear_failure(self) -> None:
         comment = classify_review_comment(
             ReviewComment(body="이 로직을 확인해주세요", path="a.py", line=10)
         )
-        assert comment.decision == ReviewDecision.ACCEPT
+        assert comment.decision == ReviewDecision.DEFER
 
     def test_defers_non_actionable_comment(self) -> None:
         comment = classify_review_comment(
@@ -104,6 +106,33 @@ class TestReviewClassification:
         assert "PR 리뷰 자동화 판단 로그" in md
         assert "ACCEPT" in md
         assert "a.py:10" in md
+
+
+class TestExistingPR:
+    def test_get_existing_pr_by_number(self, tmp_path: Path) -> None:
+        with patch(
+            "scripts.auto_pr_pipeline._run_gh",
+            return_value='{"number": 12, "url": "https://github.com/o/r/pull/12", "headRefName": "feat/x", "title": "T"}',
+        ) as mock_gh:
+            info = get_existing_pr(tmp_path, 12)
+
+        assert info.number == 12
+        assert info.branch == "feat/x"
+        assert mock_gh.call_args.args[0][:3] == ["pr", "view", "12"]
+
+    def test_commit_review_changes_stages_only_changed_files(self, tmp_path: Path) -> None:
+        calls: list[list[str]] = []
+
+        def fake_git(args: list[str], cwd: str, timeout: int = 30) -> str:
+            calls.append(args)
+            if args[:2] == ["status", "--porcelain"]:
+                return " M a.py\n?? .harness/review-artifacts/x/review-comments.md"
+            return ""
+
+        with patch("scripts.auto_pr_pipeline._run_git", side_effect=fake_git):
+            commit_review_changes(tmp_path)
+
+        assert ["add", "--", "a.py", ".harness/review-artifacts/x/review-comments.md"] in calls
 
 
 class TestPipelineResult:
@@ -195,7 +224,8 @@ class TestRunPipelineReviewAutomation:
             ),
             patch("scripts.auto_pr_pipeline.save_review_decision_log") as mock_save,
             patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=True) as mock_apply,
-            patch("scripts.auto_pr_pipeline._run_git", return_value=""),
+            patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
+            patch("scripts.auto_pr_pipeline.commit_review_changes"),
             patch("scripts.auto_pr_pipeline.post_review_replies", return_value=1) as mock_replies,
         ):
             result = run_pipeline(tmp_path, poll_reviews=False)
@@ -207,6 +237,25 @@ class TestRunPipelineReviewAutomation:
         mock_save.assert_called_once()
         mock_apply.assert_called_once_with(tmp_path, [result.actionable_comments[0]])
         mock_replies.assert_called_once()
+
+    def test_pipeline_can_process_existing_pr_number(self, tmp_path: Path) -> None:
+        with (
+            patch("scripts.auto_pr_pipeline.push_branch") as mock_push,
+            patch("scripts.auto_pr_pipeline.create_pr") as mock_create,
+            patch(
+                "scripts.auto_pr_pipeline.get_existing_pr",
+                return_value=PRInfo(number=7, url="https://github.com/o/r/pull/7"),
+            ) as mock_existing,
+            patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
+            patch("scripts.auto_pr_pipeline.collect_review_comments", return_value=[]),
+            patch("scripts.auto_pr_pipeline.save_review_decision_log"),
+        ):
+            result = run_pipeline(tmp_path, pr_number=7, poll_reviews=False)
+
+        assert result.pr_info.number == 7
+        mock_existing.assert_called_once_with(tmp_path, 7)
+        mock_push.assert_not_called()
+        mock_create.assert_not_called()
 
     def test_pipeline_does_not_reply_when_review_commit_fails(self, tmp_path: Path) -> None:
         with (
@@ -231,10 +280,8 @@ class TestRunPipelineReviewAutomation:
             ),
             patch("scripts.auto_pr_pipeline.save_review_decision_log"),
             patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=True),
-            patch(
-                "scripts.auto_pr_pipeline._run_git",
-                side_effect=["", PipelineError("nothing to commit")],
-            ),
+            patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
+            patch("scripts.auto_pr_pipeline.commit_review_changes", side_effect=PipelineError("nothing to commit")),
             patch("scripts.auto_pr_pipeline.post_review_replies") as mock_replies,
         ):
             result = run_pipeline(tmp_path, poll_reviews=False)
@@ -267,6 +314,7 @@ class TestRunPipelineReviewAutomation:
             ),
             patch("scripts.auto_pr_pipeline.save_review_decision_log"),
             patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=False),
+            patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
             patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
         ):
             result = run_pipeline(tmp_path, poll_reviews=False, auto_merge=True)
@@ -299,10 +347,8 @@ class TestRunPipelineReviewAutomation:
             ),
             patch("scripts.auto_pr_pipeline.save_review_decision_log"),
             patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=True),
-            patch(
-                "scripts.auto_pr_pipeline._run_git",
-                side_effect=["", PipelineError("nothing to commit")],
-            ),
+            patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
+            patch("scripts.auto_pr_pipeline.commit_review_changes", side_effect=PipelineError("nothing to commit")),
             patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
         ):
             result = run_pipeline(tmp_path, poll_reviews=False, auto_merge=True)

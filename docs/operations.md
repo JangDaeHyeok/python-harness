@@ -39,6 +39,8 @@ pip install -e ".[dev]"
 | `auto-pr-pipeline --base main` | PR 자동화 파이프라인 |
 | `auto-pr-pipeline --base main --auto-merge` | 리뷰 반영 후 자동 머지 |
 | `auto-pr-pipeline --base main --skip-review` | 리뷰 수집/반영 건너뛰기 |
+| `auto-pr-pipeline --pr-number 123 --no-poll` | 이미 열린 PR #123의 리뷰 코멘트만 처리 |
+| `auto-pr-pipeline --current-pr --no-poll` | 현재 브랜치에 연결된 기존 PR 리뷰 코멘트 처리 |
 | `auto-pr-pipeline --base main --title "PR 제목" --no-poll` | 제목 지정, 폴링 비활성화 |
 
 ### `harness-init` (= `python scripts/init_harness.py`)
@@ -79,14 +81,21 @@ pip install -e ".[dev]"
 - `--pr-base`, `--pr-skip-review`, `--pr-auto-merge`로 동작 제어. 통과 스프린트가 0개면 PR 단계를 건너뛴다.
 - PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다.
 - `scripts/auto_pr_pipeline.py`는 단독 실행 가능: 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영 → 답글 → 선택적 머지.
-- 리뷰 코멘트 판정: `ACCEPT` / `DEFER` / `IGNORE`. `ACCEPT`만 `claude --print` 리뷰 반영 세션에 전달.
+- 기존 PR은 `--pr-number <N>` 또는 `--current-pr`로 새 PR 생성 없이 처리한다.
+- 리뷰 코멘트 판정: `ACCEPT` / `DEFER` / `IGNORE`. 명확한 bug/failure/regression/security/type error/필수 동작 누락만 `ACCEPT`하고, optional/nit/style/consider/could 제안은 `DEFER`한다. 파일/라인 존재만으로는 `ACCEPT`하지 않는다.
+- `ACCEPT`만 `claude --print` 리뷰 반영 세션에 전달하며, 리뷰 본문은 신뢰할 수 없는 외부 입력으로 fenced block에 격리한다.
 - 판정 로그: `.harness/review-artifacts/{branch}/review-comments.md`.
-- 반영 커밋이 성공적으로 push된 경우에만 원본 리뷰 코멘트에 한국어 답글을 남긴다.
+- 리뷰 반영 전 dirty worktree가 있으면 실패한다. 반영 커밋은 자동화 중 변경된 파일만 stage하고, 성공적으로 push된 경우에만 원본 리뷰 코멘트에 한국어 답글을 남긴다.
 - GitHub review thread resolve는 답글 기반 확인으로 대체한다.
 - CodeRabbit은 외부 리뷰어로 취급, 인라인 코멘트도 동일하게 수집·분류·반영한다.
 - CodeRabbit 자동 검증은 GitHub App 설치 + `gh` CLI 인증이 전제다.
 - optional/nit/칭찬성 CodeRabbit 코멘트는 DEFER로 남기고 자동 반영하지 않는다.
 - 자세한 동작은 `harness/review/CLAUDE.md`.
+
+## 4.1 modify 컨텍스트의 Python 프로젝트 요약
+- modify 모드는 외부 Python 프로젝트에서 `pyproject.toml`, `requirements*.txt`, `setup.py`, `uv.lock`, `poetry.lock`, `Pipfile` 존재 여부를 요약한다.
+- package manager(`uv`, `poetry`, `pipenv`, `pip`, `pyproject`, `setuptools`)와 `src`/flat 레이아웃, pydantic v1/v2, requests/httpx, click/typer/argparse, pytest/unittest 힌트, 최근 git commit 메시지 일부를 짧게 포함한다.
+- 비밀값과 환경변수 값은 수집하지 않고, 의존성·import 이름 중심의 요약만 Planner 컨텍스트에 전달한다.
 
 ## 5. 프로젝트 부트스트랩(harness-init) 운영
 - 새 프로젝트나 외부 프로젝트에 하네스 규칙 파일을 한 번에 배치하는 용도.

@@ -58,6 +58,12 @@ class TestModifyContext:
         md = ctx.to_markdown()
         assert "프로젝트 정책" in md
 
+    def test_to_markdown_includes_python_project_summary(self) -> None:
+        ctx = ModifyContext(python_project_summary="- package_manager: uv")
+        md = ctx.to_markdown()
+        assert "Python 프로젝트 감지 요약" in md
+        assert "package_manager: uv" in md
+
 
 class TestModifyContextCollector:
     def test_collect_with_mocked_git(self, tmp_path: Path) -> None:
@@ -220,3 +226,40 @@ class TestModifyContextCollector:
             ctx = collector.collect()
 
         assert ctx.code_convention == "default: true"
+
+    def test_collect_python_project_summary(self, tmp_path: Path) -> None:
+        (tmp_path / "pyproject.toml").write_text(
+            "\n".join([
+                "[project]",
+                'dependencies = ["pydantic>=2", "httpx"]',
+                "[project.optional-dependencies]",
+                'dev = ["pytest"]',
+            ]),
+            encoding="utf-8",
+        )
+        (tmp_path / "uv.lock").write_text("", encoding="utf-8")
+        (tmp_path / "src" / "demo").mkdir(parents=True)
+        (tmp_path / "src" / "demo" / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "src" / "demo" / "cli.py").write_text(
+            "import argparse\nimport typer\n", encoding="utf-8"
+        )
+
+        collector = ModifyContextCollector(tmp_path)
+        with (
+            patch.object(
+                collector,
+                "_run_git",
+                side_effect=lambda *args: "main" if args == ("branch", "--show-current") else "init\nadd cli",
+            ),
+            patch.object(collector, "_run_cmd", return_value=None),
+        ):
+            ctx = collector.collect()
+
+        assert "pyproject.toml" in ctx.python_project_summary
+        assert "uv.lock" in ctx.python_project_summary
+        assert "package_manager: uv" in ctx.python_project_summary
+        assert "layout: src" in ctx.python_project_summary
+        assert "pydantic v2" in ctx.python_project_summary
+        assert "httpx" in ctx.python_project_summary
+        assert "typer" in ctx.python_project_summary
+        assert "최근 커밋 메시지" in ctx.python_project_summary

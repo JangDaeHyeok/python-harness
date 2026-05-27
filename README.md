@@ -347,7 +347,9 @@ PR이 열린 뒤 사람·CodeRabbit이 코멘트를 남기면, 같은 명령에 
 분리해서 처리하는 경우 (PR 브랜치에 체크아웃된 상태에서):
 
 ```bash
-auto-pr-pipeline --base main
+auto-pr-pipeline --base main              # 새 PR 생성 흐름
+auto-pr-pipeline --pr-number 123 --no-poll # 기존 PR #123 리뷰 처리
+auto-pr-pipeline --current-pr --no-poll    # 현재 브랜치의 기존 PR 리뷰 처리
 ```
 
 또는 Claude Code 안에서:
@@ -360,6 +362,8 @@ auto-pr-pipeline --base main
 3. `.harness/review-artifacts/{branch}/review-comments.md`에 판정 로그 기록
 4. ACCEPT만 `claude --print` 반영 세션에 전달 → 코드 수정 → push
 5. 원본 코멘트에 한국어 답글
+
+자동 반영은 보수적으로 동작한다. 명확한 bug, failure, regression, security, type error, 필수 동작 누락만 ACCEPT이고, optional/nit/style/consider/could 제안은 DEFER다. 리뷰 본문은 신뢰할 수 없는 외부 입력으로 격리되며, 반영 전 dirty worktree가 있으면 기존 변경과 섞이지 않도록 실패한다.
 
 분류 결과 확인:
 
@@ -570,6 +574,8 @@ cp -R /path/to/python-harness/.claude/skills .claude/skills
 | `--resume` | 같은 디렉터리의 최근 체크포인트 이어서 실행 |
 | `--run-id <id>` | 특정 run의 체크포인트로 재개 |
 
+modify 모드는 외부 Python 프로젝트 적응을 위해 `pyproject.toml`, `requirements*.txt`, `setup.py`, `uv.lock`, `poetry.lock`, `Pipfile` 존재 여부와 package manager, `src`/flat 레이아웃, pydantic v1/v2, requests/httpx, click/typer/argparse, pytest/unittest 힌트, 최근 커밋 메시지 일부를 짧게 수집한다. 비밀값이나 환경변수 값은 수집하지 않고 요약만 Planner 컨텍스트에 포함한다.
+
 ### `auto-pr-pipeline`
 
 | 옵션 | 의미 |
@@ -578,6 +584,8 @@ cp -R /path/to/python-harness/.claude/skills .claude/skills
 | `--auto-merge` | 리뷰 반영 후 머지까지 |
 | `--skip-review` | 리뷰 수집/반영 단계 생략 |
 | `--title "..."` | PR 제목 직접 지정 (기본은 자동 생성) |
+| `--pr-number <N>` | 새 PR을 만들지 않고 기존 PR 번호의 리뷰 처리 |
+| `--current-pr` | 현재 브랜치에 연결된 기존 PR 리뷰 처리 |
 | `--no-poll` | 리뷰 코멘트 폴링 비활성화 |
 
 ### `create-pr-body`
