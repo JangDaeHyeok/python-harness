@@ -53,6 +53,24 @@ class TextBlock:
 
 
 @dataclass
+class ToolUseBlock:
+    """도구 사용 응답 블록."""
+
+    id: str = ""
+    name: str = ""
+    input: dict[str, Any] = field(default_factory=dict)
+    type: str = "tool_use"
+
+
+@dataclass
+class RawContentBlock:
+    """알 수 없는 응답 블록."""
+
+    type: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class APIResponse:
     """API 응답."""
 
@@ -106,6 +124,7 @@ class HarnessClient:
             )
 
         request_body: dict[str, Any] = {
+            "model": model,
             "system": system,
             "messages": messages,
             "max_tokens": max_tokens,
@@ -139,10 +158,8 @@ class HarnessClient:
 
     def _parse_response(self, result: dict[str, Any]) -> APIResponse:
         """Lambda 응답을 APIResponse로 변환한다."""
-        text = result.get("text", "")
-        stop_reason = result.get("stopReason", "end_turn")
-
-        content: list[Any] = [TextBlock(text=text)]
+        content = self._parse_content(result)
+        stop_reason = self._parse_stop_reason(result, content)
 
         metrics = result.get("metrics", {})
         usage = Usage(
@@ -158,3 +175,44 @@ class HarnessClient:
             usage=usage,
             thinking=thinking_data,
         )
+
+    def _parse_content(self, result: dict[str, Any]) -> list[Any]:
+        raw_content = result.get("content")
+        if isinstance(raw_content, list):
+            content = [
+                self._parse_content_block(block)
+                for block in raw_content
+                if isinstance(block, dict)
+            ]
+            if content:
+                return content
+
+        text = result.get("text", "")
+        if isinstance(text, str):
+            return [TextBlock(text=text)]
+        return [TextBlock()]
+
+    def _parse_content_block(self, block: dict[str, Any]) -> Any:
+        block_type = block.get("type")
+        if block_type == "text":
+            text = block.get("text", "")
+            return TextBlock(text=text if isinstance(text, str) else "")
+        if block_type == "tool_use":
+            tool_input = block.get("input", {})
+            return ToolUseBlock(
+                id=str(block.get("id", "")),
+                name=str(block.get("name", "")),
+                input=tool_input if isinstance(tool_input, dict) else {},
+            )
+        return RawContentBlock(
+            type=str(block_type) if block_type is not None else "",
+            data=block,
+        )
+
+    def _parse_stop_reason(self, result: dict[str, Any], content: list[Any]) -> str:
+        stop_reason = result.get("stopReason", result.get("stop_reason"))
+        if isinstance(stop_reason, str):
+            return stop_reason
+        if any(getattr(block, "type", "") == "tool_use" for block in content):
+            return "tool_use"
+        return "end_turn"

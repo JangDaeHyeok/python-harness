@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from harness.agents.base_agent import AgentConfig, AgentMessage, BaseAgent
 from harness.agents.generator import GeneratorAgent
 from harness.agents.planner import PlannerAgent, ProductSpec
+from harness.tools.api_client import APIResponse, TextBlock, ToolUseBlock, Usage
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -111,6 +112,61 @@ class TestBaseAgentTokenUsage:
         b._token_usage = {"input": 100, "output": 50}
         a.merge_token_usage(b)
         assert a.token_usage == {"input": 110, "output": 55}
+
+
+class _FakeToolClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def create_message(self, **kwargs: Any) -> APIResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return APIResponse(
+                content=[
+                    ToolUseBlock(
+                        id="toolu_1",
+                        name="echo",
+                        input={"message": "hello"},
+                    )
+                ],
+                stop_reason="tool_use",
+                usage=Usage(input_tokens=10, output_tokens=4),
+            )
+        return APIResponse(
+            content=[TextBlock(text="done")],
+            stop_reason="end_turn",
+            usage=Usage(input_tokens=6, output_tokens=2),
+        )
+
+
+class _ToolAgent(_DummyAgent):
+    def _run_tool(self, tool_name: str, tool_input: dict[str, Any]) -> str:
+        return f"{tool_name}:{tool_input['message']}"
+
+
+class TestBaseAgentToolUseLoop:
+    def test_run_preserves_tool_use_blocks_and_appends_tool_results(self) -> None:
+        agent = _ToolAgent(AgentConfig(name="tool-agent"))
+        agent.client = _FakeToolClient()
+
+        result = agent.run("use a tool")
+
+        assert result == "done"
+        assert agent.token_usage == {"input": 16, "output": 6}
+        assistant_message = agent.conversation_history[1]
+        tool_result_message = agent.conversation_history[2]
+        assert assistant_message["role"] == "assistant"
+        assert isinstance(assistant_message["content"][0], ToolUseBlock)
+        assert tool_result_message == {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "echo:hello",
+                }
+            ],
+        }
 
 
 class TestGeneratorToolPathSafety:
