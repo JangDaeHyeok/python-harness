@@ -3,10 +3,10 @@
 Git 커밋 → PR 생성 → 리뷰 수집 → 에이전트 리뷰 반영까지 전 과정을 자동화한다.
 
 사용법:
-    python scripts/auto_pr_pipeline.py --base main
-    python scripts/auto_pr_pipeline.py --base main --confirm-github-writes
-    python scripts/auto_pr_pipeline.py --base main --auto-merge --confirm-github-writes
-    python scripts/auto_pr_pipeline.py --base main --skip-review
+    python3 scripts/auto_pr_pipeline.py --base main
+    python3 scripts/auto_pr_pipeline.py --base main --confirm-github-writes
+    python3 scripts/auto_pr_pipeline.py --base main --auto-merge --confirm-github-writes
+    python3 scripts/auto_pr_pipeline.py --base main --skip-review
 """
 
 from __future__ import annotations

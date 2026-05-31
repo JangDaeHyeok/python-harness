@@ -10,7 +10,7 @@ pip install -e ".[dev]"
 
 ## 2. 명령어 레퍼런스
 
-### `harness` (= `python scripts/run_harness.py`)
+### `harness` (= `python3 scripts/run_harness.py`)
 | 사용법 | 의미 |
 |--------|------|
 | `harness --help` | 전체 옵션 확인 |
@@ -24,7 +24,7 @@ pip install -e ".[dev]"
 | `harness --resume` | 현재 디렉터리 체크포인트 재개 |
 | `harness --run-id <run_id>` | 특정 체크포인트 재개 |
 
-### `create-pr-body` (= `python scripts/create_pr_body.py`)
+### `create-pr-body` (= `python3 scripts/create_pr_body.py`)
 | 사용법 | 의미 |
 |--------|------|
 | `create-pr-body --help` | 전체 옵션 |
@@ -33,7 +33,7 @@ pip install -e ".[dev]"
 | `create-pr-body --base main --summary "요약" --branch feature/x` | 요약·브랜치 오버라이드 |
 | `create-pr-body --base main --use-worktree` | worktree 격리 실행 |
 
-### `auto-pr-pipeline` (= `python scripts/auto_pr_pipeline.py`)
+### `auto-pr-pipeline` (= `python3 scripts/auto_pr_pipeline.py`)
 | 사용법 | 의미 |
 |--------|------|
 | `auto-pr-pipeline --help` | 전체 옵션 |
@@ -45,7 +45,7 @@ pip install -e ".[dev]"
 | `auto-pr-pipeline --current-pr --no-poll` | 현재 브랜치에 연결된 기존 PR 리뷰 코멘트 처리 |
 | `auto-pr-pipeline --base main --title "PR 제목" --no-poll` | 제목 지정, 폴링 비활성화 |
 
-### `harness-init` (= `python scripts/init_harness.py`)
+### `harness-init` (= `python3 scripts/init_harness.py`)
 | 사용법 | 의미 |
 |--------|------|
 | `harness-init --help` | 전체 옵션 |
@@ -61,12 +61,12 @@ pip install -e ".[dev]"
 ### 스크립트 직접 실행
 | 사용법 | 의미 |
 |--------|------|
-| `python scripts/run_phases.py --sprint 1` | Phase별 헤드리스 실행 |
-| `python scripts/run_phases.py --sprint 1 --require-docs-diff` | docs-update 이후 docs-diff 필수 |
+| `python3 scripts/run_phases.py --sprint 1` | Phase별 헤드리스 실행 |
+| `python3 scripts/run_phases.py --sprint 1 --require-docs-diff` | docs-update 이후 docs-diff 필수 |
 | `ruff check .` | 린트 |
 | `mypy harness` | 타입 체크 (strict) |
 | `pytest` | 테스트 |
-| `python scripts/check_structure.py` | 구조 분석 |
+| `python3 scripts/check_structure.py` | 구조 분석 |
 
 ## 3. 헤드리스 Phase 운영
 - `--use-headless-phases`는 오케스트레이터가 Generator 직접 호출 대신 `scripts/run_phases.py`를 사용하게 한다.
@@ -124,7 +124,7 @@ pip install -e ".[dev]"
 - 기본 필수 검사: `ruff`, `mypy`, `pytest`, `structure`.
 - Python 검증 설정 예시:
   `commands.lint: ruff check .`, `commands.type: mypy harness`,
-  `commands.test: pytest`, `commands.structure: python scripts/check_structure.py`,
+  `commands.test: pytest`, `commands.structure: python3 scripts/check_structure.py`,
   `min_coverage: 80`, `package_manager: pip`,
   `pytest: {timeout: 300, coverage: true}`.
 - 기본 문서 경로: `docs/code-convention.yaml`, `docs/adr/`, `harness_structure.yaml`.

@@ -2,9 +2,9 @@
 하네스 메인 실행 스크립트.
 
 사용법:
-    python scripts/run_harness.py "2D 레트로 게임 메이커를 만들어주세요"
+    python3 scripts/run_harness.py "2D 레트로 게임 메이커를 만들어주세요"
 
-    python scripts/run_harness.py \
+    python3 scripts/run_harness.py \
         --project-dir ./my-project \
         --model claude-sonnet-4-6 \
         --max-retries 3 \
@@ -12,7 +12,7 @@
         "브라우저에서 동작하는 DAW를 만들어주세요"
 
     # 구현 완료 후 PR 자동화까지 한 번에
-    python scripts/run_harness.py \
+    python3 scripts/run_harness.py \
         --mode modify \
         --use-headless-phases \
         --auto-pr --pr-base main \

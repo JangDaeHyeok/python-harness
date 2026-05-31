@@ -4,8 +4,8 @@ claude --print 모드로 Phase별 독립 세션을 순차 실행한다.
 메인 세션의 컨텍스트를 보존하면서 구현 컨텍스트를 하위 세션에 격리한다.
 
 사용법:
-    python scripts/run_phases.py --sprint 1 --project-dir ./my-project
-    python scripts/run_phases.py --sprint 1 --dry-run
+    python3 scripts/run_phases.py --sprint 1 --project-dir ./my-project
+    python3 scripts/run_phases.py --sprint 1 --dry-run
 """
 
 from __future__ import annotations

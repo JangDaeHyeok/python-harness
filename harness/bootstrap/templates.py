@@ -183,7 +183,7 @@ policies:
     lint: ruff check .
     type: mypy {package}
     test: pytest
-    structure: python scripts/check_structure.py
+    structure: python3 scripts/check_structure.py
   min_coverage:
   package_manager: pip
   pytest:

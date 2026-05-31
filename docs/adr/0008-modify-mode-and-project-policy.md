@@ -40,7 +40,7 @@ modify 모드에서는:
 
 modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 따라서 modify 실행이 중단된 뒤 사용자가 저장소 루트에서 자연스럽게
-`python scripts/run_harness.py --resume` 또는 `--run-id <id>`를 실행하면
+`python3 scripts/run_harness.py --resume` 또는 `--run-id <id>`를 실행하면
 현재 디렉터리의 `.harness/checkpoints/`를 우선 확인한다.
 
 - `--project-dir`이 명시되면 항상 그 값을 우선한다.
@@ -67,7 +67,7 @@ modify 모드의 기본 프로젝트 디렉터리는 현재 디렉터리다.
 - `policies.commands.lint`: 린트 명령 (기본값 `ruff check .`)
 - `policies.commands.type`: 타입 검사 명령 (기본값 `mypy harness`)
 - `policies.commands.test`: 테스트 명령 (기본값 `pytest`)
-- `policies.commands.structure`: 구조 검사 명령 (기본값 `python scripts/check_structure.py`)
+- `policies.commands.structure`: 구조 검사 명령 (기본값 `python3 scripts/check_structure.py`)
 - `policies.min_coverage`: pytest coverage 최소 기준. 값이 없으면 커버리지 게이트를 적용하지 않는다
 - `policies.package_manager`: Python 패키지 매니저 힌트 (기본값 `pip`)
 - `policies.pytest.timeout`: pytest 실행 제한 시간 초

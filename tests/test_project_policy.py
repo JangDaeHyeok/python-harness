@@ -23,7 +23,7 @@ class TestProjectPolicy:
         assert policy.commands.lint == "ruff check ."
         assert policy.commands.type == "mypy harness"
         assert policy.commands.test == "pytest"
-        assert policy.commands.structure == "python scripts/check_structure.py"
+        assert policy.commands.structure == "python3 scripts/check_structure.py"
         assert policy.min_coverage is None
         assert policy.package_manager == "pip"
         assert policy.pytest_timeout == 300

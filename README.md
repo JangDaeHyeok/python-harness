@@ -782,14 +782,14 @@ ADR(Architecture Decision Record)을 정해진 형식·번호 규칙·한국어 
 > 사용자: `센서가 LLM 호출 캐싱을 갖도록 바꾸려고 해. ADR로 기록해줘`
 
 Claude는 이때:
-1. `docs/adr/` 디렉터리를 확인해 다음 번호 결정 (현재 0001~0012 → `0013-...`)
-2. 스킬이 정의한 형식대로 `0013-inferential-sensor-caching.md` 생성
+1. `docs/adr/` 디렉터리를 확인해 다음 번호 결정 (현재 0001~0013 → `0014-...`)
+2. 스킬이 정의한 형식대로 `0014-inferential-sensor-caching.md` 생성
 3. 상태(Proposed/Accepted), 배경, 결정, 결과, 대안, 관련 ADR 섹션 채움
 
 **산출물 확인**
 
 ```bash
-ls docs/adr/                       # 0013-... 가 추가됨
+ls docs/adr/                       # 0014-... 가 추가됨
 ```
 
 **수동 강제 호출**
@@ -995,7 +995,7 @@ python-harness/
 │   └── pr_review.py            #   GitHub Actions PR AI 리뷰
 ├── tests/                      # pytest 테스트
 ├── docs/
-│   ├── adr/                    # ADR 0001~0012
+│   ├── adr/                    # ADR 0001~0013
 │   ├── code-convention.yaml
 │   └── operations.md           # CLI/운영 상세 가이드
 ├── .claude/                    # Claude Code 하네스 레이어
@@ -1068,7 +1068,7 @@ policies:
     lint: ruff check .
     type: mypy my_app
     test: pytest
-    structure: python scripts/check_structure.py
+    structure: python3 scripts/check_structure.py
   min_coverage: 80
   package_manager: pip
   pytest:
@@ -1120,6 +1120,7 @@ ruff check . && mypy harness && python3 scripts/check_structure.py && pytest
 | [0010](docs/adr/0010-structure-enforcement.md) | 외부 프로젝트 고정 구조 강제 | modify/resume/PR 산출물 생성 전 필수 구조 게이트 |
 | [0011](docs/adr/0011-harness-init-migration-mode.md) | harness-init 마이그레이션 모드 | 기존 Python 프로젝트 보강, package 기반 구조 고정 |
 | [0012](docs/adr/0012-deterministic-pipeline-evaluation-gate.md) | 결정적 파이프라인 평가 게이트 | 결정적 검사와 LLM 평가가 모두 pass일 때만 최종 pass |
+| [0013](docs/adr/0013-argv-command-boundary-and-phase-completion-gate.md) | argv 명령 경계와 Phase 완료 게이트 | 외부 명령을 argv 안전 경계로 실행하고 Phase handoff/범위 위반을 결정적으로 실패 처리 |
 
 신규 ADR 작성 시 `.claude/skills/adr-author/SKILL.md`의 번호 규칙·본문 형식을 따른다.
 

@@ -13,7 +13,7 @@ description: Author or update Architecture Decision Records under docs/adr/. Use
 ## 파일 위치 / 번호 규칙
 - 위치: `docs/adr/NNNN-kebab-case-title.md`.
 - 번호는 기존 ADR 중 최대값 + 1. 결번 만들지 말 것.
-- 현재까지: 0001~0009 (`docs/adr/` 디렉터리 확인 후 다음 번호 결정).
+- 현재까지: 0001~0013 (`docs/adr/` 디렉터리 확인 후 다음 번호 결정).
 
 ## 본문 형식 (한국어)
 

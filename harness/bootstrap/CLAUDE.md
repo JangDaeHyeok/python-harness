@@ -12,7 +12,8 @@
 - `harness_structure.yaml`
 - `.harness/project-policy.yaml`
 - `CLAUDE.md`
-- `.claude/settings.json`, `.claude/hooks/*`, `.claude/skills/*` (스켈레톤)
+- `.claude/settings.json`, `.claude/hooks/post_session_checks.sh`
+- `.claude/skills/*`는 배포하지 않는다. 외부 프로젝트에서 필요하면 수동 복사한다.
 
 ### 옵션 타깃 (`OPTIONAL_TARGETS`, opt-in)
 - `.coderabbit.yaml` — `--with-coderabbit` 또는 `--only coderabbit`로만 활성. GitHub App 설치는 별도. `--with-coderabbit` 사용 시 `_sync_existing_policy_coderabbit_flag`가 기존 `.harness/project-policy.yaml`의 `review_tools.coderabbit` 플래그를 `true`로 자동 동기화한다(주석/다른 키 보존).

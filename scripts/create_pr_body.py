@@ -3,10 +3,10 @@
 현재 브랜치의 diff와 리뷰 산출물을 기반으로 pr-body.md를 생성한다.
 
 사용 예:
-    python scripts/create_pr_body.py --base main
-    python scripts/create_pr_body.py --base main --output pr-body.md
-    python scripts/create_pr_body.py --base main --summary "인증 모듈 리팩터링"
-    python scripts/create_pr_body.py --base main --use-worktree
+    python3 scripts/create_pr_body.py --base main
+    python3 scripts/create_pr_body.py --base main --output pr-body.md
+    python3 scripts/create_pr_body.py --base main --summary "인증 모듈 리팩터링"
+    python3 scripts/create_pr_body.py --base main --use-worktree
 """
 
 from __future__ import annotations

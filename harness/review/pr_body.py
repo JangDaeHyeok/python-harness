@@ -150,7 +150,7 @@ class PRBodyGenerator:
         lines.append("- [ ] 단위 테스트 통과 (`pytest`)")
         lines.append("- [ ] 타입 체크 통과 (`mypy harness`)")
         lines.append("- [ ] 린트 통과 (`ruff check .`)")
-        lines.append("- [ ] 구조 분석 통과 (`python scripts/check_structure.py`)")
+        lines.append("- [ ] 구조 분석 통과 (`python3 scripts/check_structure.py`)")
         lines.append("")
 
         # ADR Rationale

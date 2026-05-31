@@ -27,7 +27,7 @@ class ValidationCommands:
     lint: str = "ruff check ."
     type: str = "mypy harness"
     test: str = "pytest"
-    structure: str = "python scripts/check_structure.py"
+    structure: str = "python3 scripts/check_structure.py"
 
 
 @dataclass
@@ -131,7 +131,7 @@ class ProjectPolicy:
                 lint=str(commands.get("lint", "ruff check .")),
                 type=str(commands.get("type", "mypy harness")),
                 test=str(commands.get("test", "pytest")),
-                structure=str(commands.get("structure", "python scripts/check_structure.py")),
+                structure=str(commands.get("structure", "python3 scripts/check_structure.py")),
             ),
             min_coverage=_optional_float(policies.get("min_coverage")),
             package_manager=str(policies.get("package_manager", "pip")),

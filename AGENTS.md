@@ -122,7 +122,7 @@ harness/
 ```bash
 pip install -e ".[dev]"           # 개발 의존성 설치
 
-# === harness (= python scripts/run_harness.py) ===
+# === harness (= python3 scripts/run_harness.py) ===
 harness --help                                      # 전체 옵션 확인
 harness "프롬프트"                                    # create 모드
 harness --mode modify "수정 요청"                     # modify 모드
@@ -133,17 +133,17 @@ harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-m
 harness --resume
 harness --run-id <run_id>
 
-# === create-pr-body (= python scripts/create_pr_body.py) ===
+# === create-pr-body (= python3 scripts/create_pr_body.py) ===
 create-pr-body --help
 create-pr-body --base main
 create-pr-body --base main --output pr-body.md
 
-# === auto-pr-pipeline (= python scripts/auto_pr_pipeline.py) ===
+# === auto-pr-pipeline (= python3 scripts/auto_pr_pipeline.py) ===
 auto-pr-pipeline --help
 auto-pr-pipeline --base main
 auto-pr-pipeline --base main --auto-merge --confirm-github-writes
 
-# === harness-init (= python scripts/init_harness.py) ===
+# === harness-init (= python3 scripts/init_harness.py) ===
 harness-init --help
 harness-init --offline "사내 청구 자동화 도구"
 harness-init --project-dir ./billing --offline "PoC"
@@ -153,12 +153,12 @@ harness-init --force --only claude --offline "운영 가이드 갱신"
 harness-init --dry-run --offline "사전 검토"
 
 # === 스크립트 직접 실행 (CLI 단축 명령 없음) ===
-python scripts/run_phases.py --sprint 1
-python scripts/run_phases.py --sprint 1 --require-docs-diff
+python3 scripts/run_phases.py --sprint 1
+python3 scripts/run_phases.py --sprint 1 --require-docs-diff
 ruff check .
 mypy harness
 pytest
-python scripts/check_structure.py
+python3 scripts/check_structure.py
 ```
 
 ## CLI 엔트리포인트
@@ -172,7 +172,7 @@ python scripts/check_structure.py
   - `harness_structure.yaml`
   - `.harness/project-policy.yaml`
   - `CLAUDE.md`
-  - `.claude/settings.json` (`CLAUDE_CONFIG` 대상 — 팀 공유 allow/deny, **JSON 보안 설정이므로 LLM 위임을 명시적으로 차단**. allow 목록은 `gh pr view/list/diff/status/checks/comment/create *` 같은 좁힌 패턴만 사용하고, `gh api` 및 destructive 서브명령은 일부러 제외한다. `python scripts/*` allow가 우회로가 되지 않도록 PR 파이프라인의 `--confirm-github-writes` 계열 플래그는 deny에 둔다.)
+  - `.claude/settings.json` (`CLAUDE_CONFIG` 대상 — 팀 공유 allow/deny, **JSON 보안 설정이므로 LLM 위임을 명시적으로 차단**. allow 목록은 `gh pr view/list/diff/status/checks/comment/create *` 같은 좁힌 패턴만 사용하고, `gh api` 및 destructive 서브명령은 일부러 제외한다. `python3 scripts/*` allow가 우회로가 되지 않도록 PR 파이프라인의 `--confirm-github-writes` 계열 플래그는 deny에 둔다.)
   - `.claude/hooks/post_session_checks.sh` (`CLAUDE_CONFIG` 선택 시 settings.json과 별도 plan으로 함께 생성. 쓰기 순서는 hook → settings.json 순으로 트랜잭션 안전성 확보. 기존 settings가 있어도 누락 시 복구. fresh 프로젝트에서는 없는 도구/파일 검사를 건너뛰고 `pytest` exit 5(no tests collected)는 성공 처리.)
 
 ## 산출물 경로
@@ -284,7 +284,7 @@ GitHub review thread resolve는 REST API 제약으로 답글 기반 확인으로
 - `artifacts`는 design-intent, code-quality-guide, review-comments, pr-body 산출물 생성 정책이다.
 - `custom_rules`는 프로젝트별 암묵지/금지사항/검증 규칙을 적는 자유 영역이다.
 - 정책 파일에는 비밀값이나 토큰을 넣지 않는다.
-- 정책 변경 후에는 `ruff check`, `mypy harness`, `python scripts/check_structure.py`, `pytest`를 실행한다.
+- 정책 변경 후에는 `ruff check`, `mypy harness`, `python3 scripts/check_structure.py`, `pytest`를 실행한다.
 
 ## 체크포인트 재개 규약
 - `.harness/checkpoints/<run_id>.json`은 실행별 체크포인트다.
