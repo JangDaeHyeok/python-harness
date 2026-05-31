@@ -37,7 +37,11 @@
       "Read(./.harness/checkpoints/**)",
       "Read(./node_modules/**)",
       "Read(./dist/**)",
-      "Read(./build/**)"
+      "Read(./build/**)",
+      "Bash(python scripts/auto_pr_pipeline.py *--confirm-github-writes*)",
+      "Bash(python3 scripts/auto_pr_pipeline.py *--confirm-github-writes*)",
+      "Bash(python scripts/run_harness.py *--pr-confirm-github-writes*)",
+      "Bash(python3 scripts/run_harness.py *--pr-confirm-github-writes*)"
     ]
   },
   "hooks": {

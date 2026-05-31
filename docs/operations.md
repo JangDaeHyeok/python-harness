@@ -18,8 +18,9 @@ pip install -e ".[dev]"
 | `harness --mode modify "수정 요청"` | modify 모드: 현재 코드베이스 수정 |
 | `harness --mode modify --use-headless-phases "수정 요청"` | Phase별 `claude --print` 실행 |
 | `harness --mode modify --use-headless-phases --allow-empty-docs-diff "..."` | 문서 변경이 없는 예외 작업 |
-| `harness --mode modify --use-headless-phases --auto-pr --pr-base main "..."` | 구현 → PR → 리뷰 반영 End-to-End |
-| `harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge "..."` | 머지까지 한 번에 |
+| `harness --mode modify --use-headless-phases --auto-pr --pr-base main "..."` | 구현 → PR → 리뷰 반영. 팀 allow 밖 GitHub 쓰기(리뷰 답글/머지)는 건너뜀 |
+| `harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-confirm-github-writes "..."` | 리뷰 답글까지 명시 승인 |
+| `harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge --pr-confirm-github-writes "..."` | 답글과 머지까지 명시 승인 |
 | `harness --resume` | 현재 디렉터리 체크포인트 재개 |
 | `harness --run-id <run_id>` | 특정 체크포인트 재개 |
 
@@ -36,8 +37,9 @@ pip install -e ".[dev]"
 | 사용법 | 의미 |
 |--------|------|
 | `auto-pr-pipeline --help` | 전체 옵션 |
-| `auto-pr-pipeline --base main` | PR 자동화 파이프라인 |
-| `auto-pr-pipeline --base main --auto-merge` | 리뷰 반영 후 자동 머지 |
+| `auto-pr-pipeline --base main` | PR 자동화 파이프라인. 리뷰 답글/머지는 승인 필요 단계로 건너뜀 |
+| `auto-pr-pipeline --base main --confirm-github-writes` | 리뷰 답글(`gh api --method POST`)까지 명시 승인 |
+| `auto-pr-pipeline --base main --auto-merge --confirm-github-writes` | 리뷰 반영 후 자동 머지까지 명시 승인 |
 | `auto-pr-pipeline --base main --skip-review` | 리뷰 수집/반영 건너뛰기 |
 | `auto-pr-pipeline --pr-number 123 --no-poll` | 이미 열린 PR #123의 리뷰 코멘트만 처리 |
 | `auto-pr-pipeline --current-pr --no-poll` | 현재 브랜치에 연결된 기존 PR 리뷰 코멘트 처리 |
@@ -78,14 +80,14 @@ pip install -e ".[dev]"
 
 ## 4. PR 자동화 운영
 - `run_harness.py --auto-pr` 사용 시 구현 성공 후 PR 파이프라인을 이어 실행한다.
-- `--pr-base`, `--pr-skip-review`, `--pr-auto-merge`로 동작 제어. 통과 스프린트가 0개면 PR 단계를 건너뛴다.
+- `--pr-base`, `--pr-skip-review`, `--pr-auto-merge`, `--pr-confirm-github-writes`로 동작 제어. 통과 스프린트가 0개면 PR 단계를 건너뛴다.
 - PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다.
-- `scripts/auto_pr_pipeline.py`는 단독 실행 가능: 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영 → 답글 → 선택적 머지.
+- `scripts/auto_pr_pipeline.py`는 단독 실행 가능: 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영까지 기본 수행한다. 리뷰 답글(`gh api --method POST`)과 선택적 머지(`gh pr merge`)는 `--confirm-github-writes`가 있을 때만 실행한다.
 - 기존 PR은 `--pr-number <N>` 또는 `--current-pr`로 새 PR 생성 없이 처리한다.
 - 리뷰 코멘트 판정: `ACCEPT` / `DEFER` / `IGNORE`. 명확한 bug/failure/regression/security/type error/필수 동작 누락만 `ACCEPT`하고, optional/nit/style/consider/could 제안은 `DEFER`한다. 파일/라인 존재만으로는 `ACCEPT`하지 않는다.
 - `ACCEPT`만 `claude --print` 리뷰 반영 세션에 전달하며, 리뷰 본문은 신뢰할 수 없는 외부 입력으로 fenced block에 격리한다.
 - 판정 로그: `.harness/review-artifacts/{branch}/review-comments.md`.
-- 리뷰 반영 전 dirty worktree가 있으면 실패한다. 반영 커밋은 자동화 중 변경된 파일만 stage하고, 성공적으로 push된 경우에만 원본 리뷰 코멘트에 한국어 답글을 남긴다.
+- 리뷰 반영 전 dirty worktree가 있으면 실패한다. 반영 커밋은 자동화 중 변경된 파일만 stage한다. 원본 리뷰 코멘트 한국어 답글은 성공적으로 push되고 `--confirm-github-writes`가 명시된 경우에만 남긴다.
 - GitHub review thread resolve는 답글 기반 확인으로 대체한다.
 - CodeRabbit은 외부 리뷰어로 취급, 인라인 코멘트도 동일하게 수집·분류·반영한다.
 - CodeRabbit 자동 검증은 GitHub App 설치 + `gh` CLI 인증이 전제다.
@@ -107,8 +109,9 @@ pip install -e ".[dev]"
 - `--with-coderabbit` 사용 시 기존 `.harness/project-policy.yaml`이 있어도 `policies.review_tools.coderabbit` 플래그를 `true`로 자동 동기화한다. 다른 키/주석은 보존된다.
 - `.coderabbit.yaml`의 `knowledge_base.code_guidelines`로 인해 `CLAUDE.md`, `docs/adr/*.md`, `.harness/project-policy.yaml`이 CodeRabbit(third-party SaaS)으로 전송된다. 사내 정보 포함 여부를 검토한 뒤 사용한다.
 - `harness-init`은 CodeRabbit GitHub App을 설치하지 않는다. 저장소 설정에서 App 설치와 권한 승인을 별도로 완료해야 PR 리뷰가 실행된다.
+- 생성/마이그레이션되는 `harness_structure.yaml`의 `no_print_debug`는 `severity: error`다. 외부 프로젝트에 `guard_no_print.py` PreToolUse 훅을 배포하지 않더라도 `python3 scripts/check_structure.py`와 Stop 훅의 structure 단계에서 `print()` 디버깅이 실패로 처리된다.
 - `claude-config`는 보안 설정이므로 LLM에 위임하지 않고 결정적 템플릿을 사용한다. 이 대상은 `.claude/settings.json`과 Stop 훅 스크립트를 함께 생성하며, 두 파일은 각각 별도 `BootstrapPlan` 항목으로 요약에 노출된다. 쓰기 순서는 sidecar hook → `settings.json` 순이라 중간 실패가 발생해도 다음 실행이 fresh 경로로 깔끔히 복구된다. 기존 `settings.json`이 있어도 Stop 훅 스크립트가 누락되었으면 sidecar hook만 복구한다.
-- `.claude/settings.json` allow 목록은 좁힌 패턴만 사용한다. `pip install *` 같은 와일드카드와 `gh pr *`/`gh api *` 무제약 패턴은 금지하고, `gh pr view/list/diff/status/checks/comment/create *`만 허용한다. `gh api repos/*`도 HTTP 메서드 플래그로 쓰기 요청이 가능하므로 팀 공유 allow에서는 제외한다. destructive 서브명령(`gh pr merge|close|reopen|edit`)은 일부러 빼고 사용자 확인을 거치게 한다.
+- `.claude/settings.json` allow 목록은 좁힌 패턴만 사용한다. `pip install *` 같은 와일드카드와 `gh pr *`/`gh api *` 무제약 패턴은 금지하고, `gh pr view/list/diff/status/checks/comment/create *`만 허용한다. `gh api repos/*`도 HTTP 메서드 플래그로 쓰기 요청이 가능하므로 팀 공유 allow에서는 제외한다. destructive 서브명령(`gh pr merge|close|reopen|edit`)은 일부러 빼고 사용자 확인을 거치게 한다. `python scripts/*` allow가 이 경계를 우회하지 않도록 `--confirm-github-writes`/`--pr-confirm-github-writes`가 붙은 PR 파이프라인 실행은 deny에 둔다.
 - 부트스트랩 Stop 훅은 fresh 프로젝트에서 실패하지 않도록 설치된 도구와 존재하는 파일만 검사한다. `scripts/check_structure.py`나 `tests/`가 없으면 해당 단계는 건너뛰고, `pytest`가 수집한 테스트가 0건(exit 5)이면 성공으로 간주한다.
 - `--dry-run`은 쓰기 없이 결과 미리보기.
 - LLM 엔드포인트(`HARNESS_API_ENDPOINT`)가 설정되어 있고 `--offline`이 아니면 LLM이 템플릿을 사용자 의도에 맞게 다듬는다.

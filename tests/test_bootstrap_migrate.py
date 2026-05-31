@@ -82,7 +82,24 @@ def test_migrate_single_package_auto_adopts_and_creates_required_files(
     structure = yaml.safe_load((tmp_path / "harness_structure.yaml").read_text())
     no_print = next(rule for rule in structure["rules"] if rule["name"] == "no_print_debug")
     assert no_print["directories"] == ["billing"]
+    assert no_print["severity"] == "error"
     _assert_migration_gate_passes(tmp_path)
+
+
+def test_migrate_no_print_debug_fails_on_package_print(tmp_path: Path) -> None:
+    _write_package(tmp_path, "billing")
+
+    initializer = BootstrapInitializer(project_dir=tmp_path, offline=True)
+    initializer.migrate_existing()
+    (tmp_path / "billing/debug.py").write_text("print('debug')\n", encoding="utf-8")
+
+    result = StructureAnalyzer(str(tmp_path)).analyze()
+
+    assert not result.passed
+    assert any(
+        v.rule_name == "no_print_debug" and v.severity == "error"
+        for v in result.violations
+    )
 
 
 def test_migrate_existing_empty_tests_and_scripts_get_gitkeep(
@@ -148,6 +165,7 @@ def test_migrate_multiple_packages_uses_policy_package(tmp_path: Path) -> None:
     structure = yaml.safe_load((tmp_path / "harness_structure.yaml").read_text())
     no_print = next(rule for rule in structure["rules"] if rule["name"] == "no_print_debug")
     assert no_print["directories"] == ["payments"]
+    assert no_print["severity"] == "error"
     _assert_migration_gate_passes(tmp_path)
 
 

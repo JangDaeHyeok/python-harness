@@ -99,6 +99,7 @@ def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
             args.pr_base,
             skip_review=args.pr_skip_review,
             auto_merge=args.pr_auto_merge,
+            confirm_github_writes=args.pr_confirm_github_writes,
         )
     except PipelineError as e:
         logger.error("PR 파이프라인 실패: %s", e)
@@ -109,6 +110,8 @@ def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
     print(f"  반영 대상: {len(result.actionable_comments)}개")
     print(f"  리뷰 반영: {'완료' if result.review_applied else '미반영'}")
     print(f"  머지: {'완료' if result.merged else '미실행'}")
+    if result.warnings:
+        logger.warning("PR 파이프라인 주의: %s", "; ".join(result.warnings))
     if result.errors:
         logger.warning("PR 파이프라인 오류: %s", "; ".join(result.errors))
 
@@ -186,6 +189,14 @@ def main() -> None:
         "--pr-auto-merge",
         action="store_true",
         help="리뷰 반영 후 PR 자동 머지 (--auto-pr 사용 시)",
+    )
+    pr_group.add_argument(
+        "--pr-confirm-github-writes",
+        action="store_true",
+        help=(
+            "팀 공유 allow 밖 GitHub 쓰기 작업(리뷰 답글 gh api POST, gh pr merge)을 "
+            "--auto-pr 흐름에서 명시적으로 승인"
+        ),
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 

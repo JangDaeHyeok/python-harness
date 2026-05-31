@@ -4,7 +4,8 @@ Git 커밋 → PR 생성 → 리뷰 수집 → 에이전트 리뷰 반영까지 
 
 사용법:
     python scripts/auto_pr_pipeline.py --base main
-    python scripts/auto_pr_pipeline.py --base main --auto-merge
+    python scripts/auto_pr_pipeline.py --base main --confirm-github-writes
+    python scripts/auto_pr_pipeline.py --base main --auto-merge --confirm-github-writes
     python scripts/auto_pr_pipeline.py --base main --skip-review
 """
 
@@ -33,6 +34,12 @@ logger = logging.getLogger(__name__)
 _GH_TIMEOUT = 30
 _REVIEW_POLL_INTERVAL = 30
 _REVIEW_POLL_MAX_ATTEMPTS = 20
+_GITHUB_WRITE_CONFIRMATION_HELP = (
+    "리뷰 답글(gh api --method POST)과 자동 머지(gh pr merge)는 "
+    ".claude/settings.json 팀 공유 allow 밖의 GitHub 쓰기 작업입니다. "
+    "자동 실행하려면 --confirm-github-writes를 명시하거나, 출력된 PR 번호를 확인한 뒤 "
+    "gh pr comment/gh pr merge를 직접 실행하세요."
+)
 
 _ACTIONABLE_KEYWORDS = frozenset({
     "bug", "broken", "broken test", "crash", "failing test", "failure",
@@ -104,6 +111,7 @@ class PipelineResult:
     replies_posted: int = 0
     merged: bool = False
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _run_gh(args: list[str], cwd: str, timeout: int = _GH_TIMEOUT) -> str:
@@ -457,8 +465,12 @@ def post_review_replies(
     comments: list[ReviewComment],
     *,
     applied: bool,
+    confirm_github_writes: bool = False,
 ) -> int:
     """리뷰 코멘트 처리 결과별 답글을 남긴다."""
+    if not confirm_github_writes:
+        raise PipelineError(_GITHUB_WRITE_CONFIRMATION_HELP)
+
     posted = 0
     for comment in comments:
         if comment.comment_id <= 0:
@@ -531,6 +543,7 @@ def run_pipeline(
     poll_reviews: bool = True,
     pr_number: int | None = None,
     current_pr: bool = False,
+    confirm_github_writes: bool = False,
 ) -> PipelineResult:
     """PR 자동화 파이프라인 전체를 실행한다."""
     result = PipelineResult()
@@ -581,21 +594,34 @@ def run_pipeline(
                     committed = True
                 except PipelineError as e:
                     result.errors.append(f"리뷰 반영 커밋 실패: {e}")
-            result.replies_posted = post_review_replies(
-                project_dir,
-                pr_info.number,
-                comments,
-                applied=committed,
-            )
+            if confirm_github_writes:
+                result.replies_posted = post_review_replies(
+                    project_dir,
+                    pr_info.number,
+                    comments,
+                    applied=committed,
+                    confirm_github_writes=True,
+                )
+            else:
+                result.warnings.append(_GITHUB_WRITE_CONFIRMATION_HELP)
         elif comments:
-            result.replies_posted = post_review_replies(
-                project_dir,
-                pr_info.number,
-                comments,
-                applied=False,
-            )
+            if confirm_github_writes:
+                result.replies_posted = post_review_replies(
+                    project_dir,
+                    pr_info.number,
+                    comments,
+                    applied=False,
+                    confirm_github_writes=True,
+                )
+            else:
+                result.warnings.append(_GITHUB_WRITE_CONFIRMATION_HELP)
 
     if auto_merge and pr_info.number > 0:
+        if not confirm_github_writes:
+            result.warnings.append(
+                f"자동 머지 건너뜀: {_GITHUB_WRITE_CONFIRMATION_HELP}"
+            )
+            return result
         review_commit_failed = any(
             error.startswith("리뷰 반영 커밋 실패") for error in result.errors
         )
@@ -641,6 +667,14 @@ def main() -> None:
     )
     parser.add_argument("--skip-review", action="store_true", help="리뷰 수집/반영 건너뛰기")
     parser.add_argument("--auto-merge", action="store_true", help="자동 머지")
+    parser.add_argument(
+        "--confirm-github-writes",
+        action="store_true",
+        help=(
+            "팀 공유 allow 밖 GitHub 쓰기 작업(리뷰 답글 gh api POST, gh pr merge)을 "
+            "명시적으로 승인"
+        ),
+    )
     parser.add_argument("--no-poll", action="store_true", help="리뷰 폴링 비활성화")
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
@@ -658,6 +692,7 @@ def main() -> None:
         poll_reviews=not args.no_poll,
         pr_number=args.pr_number,
         current_pr=args.current_pr,
+        confirm_github_writes=args.confirm_github_writes,
     )
 
     print(f"\nPR: {result.pr_info.url or '생성 실패'}")
@@ -666,6 +701,8 @@ def main() -> None:
     print(f"리뷰 반영: {'완료' if result.review_applied else '미반영'}")
     print(f"리뷰 답글: {result.replies_posted}개")
     print(f"머지: {'완료' if result.merged else '미실행'}")
+    if result.warnings:
+        print(f"주의: {'; '.join(result.warnings)}")
     if result.errors:
         print(f"오류: {'; '.join(result.errors)}")
         sys.exit(1)

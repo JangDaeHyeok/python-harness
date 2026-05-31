@@ -123,7 +123,7 @@ rules:
     # directories를 생략하면 프로젝트 루트(".")부터 검사한다.
     # 검사 범위를 좁히려면 ["src", "app"] 처럼 명시적으로 지정한다.
     message: "print() 대신 logging을 사용하세요"
-    severity: warning
+    severity: error
 """
 
 _MIGRATION_STRUCTURE_TEMPLATE = """\
@@ -148,7 +148,7 @@ rules:
     directories:
       - {package}
     message: "print() 대신 logging을 사용하세요"
-    severity: warning
+    severity: error
 """
 
 _POLICY_TEMPLATE = """\
@@ -279,7 +279,11 @@ _CLAUDE_SETTINGS_TEMPLATE = """\
       "Read(./.harness/checkpoints/**)",
       "Read(./node_modules/**)",
       "Read(./dist/**)",
-      "Read(./build/**)"
+      "Read(./build/**)",
+      "Bash(python scripts/auto_pr_pipeline.py *--confirm-github-writes*)",
+      "Bash(python3 scripts/auto_pr_pipeline.py *--confirm-github-writes*)",
+      "Bash(python scripts/run_harness.py *--pr-confirm-github-writes*)",
+      "Bash(python3 scripts/run_harness.py *--pr-confirm-github-writes*)"
     ]
   }},
   "hooks": {{
@@ -314,6 +318,7 @@ _CLAUDE_TEMPLATE = """\
 - mypy 에러 0개
 - pytest 전체 통과
 - 구조 규칙 위반 0개
+- `print()` 디버깅 금지 (`harness_structure.yaml`의 `no_print_debug` error 규칙)
 
 ## 운영 명령
 ```bash

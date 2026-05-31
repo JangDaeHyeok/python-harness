@@ -32,6 +32,7 @@ from harness.bootstrap.templates import (
     render_policy,
     render_structure,
 )
+from harness.sensors.computational.structure_test import StructureAnalyzer
 
 _SAFE_PIP_ALLOW = {
     "Bash(pip install -e .)",
@@ -50,6 +51,13 @@ _SAFE_GH_ALLOW = {
     "Bash(gh pr checks *)",
     "Bash(gh pr comment *)",
     "Bash(gh pr create *)",
+}
+
+_GITHUB_WRITE_CONFIRM_DENY = {
+    "Bash(python scripts/auto_pr_pipeline.py *--confirm-github-writes*)",
+    "Bash(python3 scripts/auto_pr_pipeline.py *--confirm-github-writes*)",
+    "Bash(python scripts/run_harness.py *--pr-confirm-github-writes*)",
+    "Bash(python3 scripts/run_harness.py *--pr-confirm-github-writes*)",
 }
 
 
@@ -75,6 +83,11 @@ def _assert_claude_settings_allow_is_narrow(allow: list[str]) -> None:
             )
 
 
+def _assert_github_write_confirm_requires_permission(deny: list[str]) -> None:
+    missing = _GITHUB_WRITE_CONFIRM_DENY - set(deny)
+    assert not missing, f"GitHub 쓰기 확인 플래그 deny 누락: {missing}"
+
+
 class TestRepoClaudeSettings:
     def test_committed_team_settings_keep_permissions_narrow(self) -> None:
         """실제 커밋되는 .claude/settings.json도 템플릿과 같은 보안 정책을 따라야 한다."""
@@ -83,8 +96,10 @@ class TestRepoClaudeSettings:
 
         loaded = _json.loads(settings_path.read_text(encoding="utf-8"))
         allow: list[str] = loaded["permissions"]["allow"]
+        deny: list[str] = loaded["permissions"]["deny"]
 
         _assert_claude_settings_allow_is_narrow(allow)
+        _assert_github_write_confirm_requires_permission(deny)
 
 
 class TestTemplates:
@@ -119,6 +134,29 @@ class TestTemplates:
         loaded = yaml.safe_load(render_structure(ctx))
         rule = next(r for r in loaded["rules"] if r["name"] == "no_print_debug")
         assert "directories" not in rule
+        assert rule["severity"] == "error"
+
+    def test_render_structure_no_print_debug_fails_on_print(self, tmp_path: Path) -> None:
+        """생성 템플릿의 print 금지 규칙은 구조 검사를 실패시켜야 한다."""
+        ctx = TemplateContext(project_name="x", intent_summary="y")
+        (tmp_path / "harness_structure.yaml").write_text(
+            render_structure(ctx), encoding="utf-8"
+        )
+        (tmp_path / "CLAUDE.md").write_text("# x\n", encoding="utf-8")
+        adr_path = tmp_path / "docs/adr/0001-initial-architecture.md"
+        adr_path.parent.mkdir(parents=True)
+        adr_path.write_text("# ADR\n", encoding="utf-8")
+        convention_path = tmp_path / "docs/code-convention.yaml"
+        convention_path.write_text("conventions: []\n", encoding="utf-8")
+        (tmp_path / "app.py").write_text("print('debug')\n", encoding="utf-8")
+
+        result = StructureAnalyzer(str(tmp_path)).analyze()
+
+        assert not result.passed
+        assert any(
+            v.rule_name == "no_print_debug" and v.severity == "error"
+            for v in result.violations
+        )
 
     def test_render_adr_uses_today_date(self) -> None:
         """ADR 템플릿의 date 필드가 오늘 날짜로 채워지는지 확인."""
@@ -400,6 +438,7 @@ class TestBootstrapInitializerOffline:
         deny = loaded["permissions"]["deny"]
         assert "Read(./.harness/tasks/**)" not in deny
         assert "Read(./.harness/review-artifacts/**)" not in deny
+        _assert_github_write_confirm_requires_permission(deny)
         stop_hooks = loaded["hooks"]["Stop"][0]["hooks"]
         assert (
             stop_hooks[0]["command"]

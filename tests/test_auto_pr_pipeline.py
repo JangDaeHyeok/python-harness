@@ -288,6 +288,7 @@ class TestReviewReplies:
                 1,
                 [ReviewComment(comment_id=10, decision=ReviewDecision.ACCEPT)],
                 applied=False,
+                confirm_github_writes=True,
             )
 
         assert posted == 1
@@ -303,6 +304,7 @@ class TestReviewReplies:
                     ReviewComment(comment_id=0, decision=ReviewDecision.ACCEPT),
                 ],
                 applied=True,
+                confirm_github_writes=True,
             )
 
         assert posted == 1
@@ -364,7 +366,11 @@ class TestRunPipelineReviewAutomation:
             patch("scripts.auto_pr_pipeline.commit_review_changes"),
             patch("scripts.auto_pr_pipeline.post_review_replies", return_value=1) as mock_replies,
         ):
-            result = run_pipeline(tmp_path, poll_reviews=False)
+            result = run_pipeline(
+                tmp_path,
+                poll_reviews=False,
+                confirm_github_writes=True,
+            )
 
         assert len(result.review_comments) == 2
         assert len(result.actionable_comments) == 1
@@ -393,6 +399,42 @@ class TestRunPipelineReviewAutomation:
         mock_push.assert_not_called()
         mock_create.assert_not_called()
 
+    def test_pipeline_skips_review_replies_without_github_write_confirmation(
+        self, tmp_path: Path
+    ) -> None:
+        with (
+            patch("scripts.auto_pr_pipeline.push_branch", return_value="feat/test"),
+            patch(
+                "scripts.auto_pr_pipeline.create_pr",
+                return_value=PRInfo(number=7, url="https://github.com/o/r/pull/7"),
+            ),
+            patch(
+                "scripts.auto_pr_pipeline.collect_review_comments",
+                return_value=[
+                    ReviewComment(
+                        comment_id=1,
+                        body="fix this bug",
+                        path="a.py",
+                        line=3,
+                        author="coderabbit",
+                        decision=ReviewDecision.ACCEPT,
+                        reason="수정 필요",
+                    ),
+                ],
+            ),
+            patch("scripts.auto_pr_pipeline.save_review_decision_log"),
+            patch("scripts.auto_pr_pipeline.apply_review_headless", return_value=True),
+            patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
+            patch("scripts.auto_pr_pipeline.commit_review_changes"),
+            patch("scripts.auto_pr_pipeline.post_review_replies") as mock_replies,
+        ):
+            result = run_pipeline(tmp_path, poll_reviews=False)
+
+        assert result.review_applied is True
+        assert result.replies_posted == 0
+        assert any("--confirm-github-writes" in warning for warning in result.warnings)
+        mock_replies.assert_not_called()
+
     def test_pipeline_replies_with_failure_when_review_commit_fails(self, tmp_path: Path) -> None:
         with (
             patch("scripts.auto_pr_pipeline.push_branch", return_value="feat/test"),
@@ -420,7 +462,11 @@ class TestRunPipelineReviewAutomation:
             patch("scripts.auto_pr_pipeline.commit_review_changes", side_effect=PipelineError("nothing to commit")),
             patch("scripts.auto_pr_pipeline.post_review_replies", return_value=1) as mock_replies,
         ):
-            result = run_pipeline(tmp_path, poll_reviews=False)
+            result = run_pipeline(
+                tmp_path,
+                poll_reviews=False,
+                confirm_github_writes=True,
+            )
 
         assert result.review_applied is True
         assert result.replies_posted == 1
@@ -453,11 +499,36 @@ class TestRunPipelineReviewAutomation:
             patch("scripts.auto_pr_pipeline.ensure_clean_worktree"),
             patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
         ):
-            result = run_pipeline(tmp_path, poll_reviews=False, auto_merge=True)
+            result = run_pipeline(
+                tmp_path,
+                poll_reviews=False,
+                auto_merge=True,
+                confirm_github_writes=True,
+            )
 
         assert result.review_applied is False
         assert result.merged is False
         assert any("자동 머지 건너뜀" in error for error in result.errors)
+        mock_merge.assert_not_called()
+
+    def test_auto_merge_requires_github_write_confirmation(self, tmp_path: Path) -> None:
+        with (
+            patch("scripts.auto_pr_pipeline.push_branch", return_value="feat/test"),
+            patch(
+                "scripts.auto_pr_pipeline.create_pr",
+                return_value=PRInfo(number=7, url="https://github.com/o/r/pull/7"),
+            ),
+            patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
+        ):
+            result = run_pipeline(
+                tmp_path,
+                poll_reviews=False,
+                skip_review=True,
+                auto_merge=True,
+            )
+
+        assert result.merged is False
+        assert any("--confirm-github-writes" in warning for warning in result.warnings)
         mock_merge.assert_not_called()
 
     def test_auto_merge_skips_when_review_commit_fails(self, tmp_path: Path) -> None:
@@ -487,7 +558,12 @@ class TestRunPipelineReviewAutomation:
             patch("scripts.auto_pr_pipeline.commit_review_changes", side_effect=PipelineError("nothing to commit")),
             patch("scripts.auto_pr_pipeline.merge_pr") as mock_merge,
         ):
-            result = run_pipeline(tmp_path, poll_reviews=False, auto_merge=True)
+            result = run_pipeline(
+                tmp_path,
+                poll_reviews=False,
+                auto_merge=True,
+                confirm_github_writes=True,
+            )
 
         assert result.review_applied is True
         assert result.merged is False
