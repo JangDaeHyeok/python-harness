@@ -17,6 +17,12 @@
         --use-headless-phases \
         --auto-pr --pr-base main \
         "로그인 에러 메시지를 개선해주세요"
+
+    # 기존 PR 리뷰만 다시 처리
+    python3 scripts/run_harness.py \
+        --mode modify \
+        --auto-pr --pr-current-pr --pr-no-poll \
+        "현재 PR 리뷰 코멘트를 반영해주세요"
 """
 
 from __future__ import annotations
@@ -97,8 +103,12 @@ def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
         result = run_pipeline(
             project_dir,
             args.pr_base,
+            title=args.pr_title,
             skip_review=args.pr_skip_review,
             auto_merge=args.pr_auto_merge,
+            poll_reviews=not args.pr_no_poll,
+            pr_number=args.pr_number,
+            current_pr=args.pr_current_pr,
             confirm_github_writes=args.pr_confirm_github_writes,
         )
     except PipelineError as e:
@@ -109,6 +119,7 @@ def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
     print(f"  리뷰 코멘트: {len(result.review_comments)}개")
     print(f"  반영 대상: {len(result.actionable_comments)}개")
     print(f"  리뷰 반영: {'완료' if result.review_applied else '미반영'}")
+    print(f"  리뷰 답글: {result.replies_posted}개")
     print(f"  머지: {'완료' if result.merged else '미실행'}")
     if result.warnings:
         logger.warning("PR 파이프라인 주의: %s", "; ".join(result.warnings))
@@ -181,6 +192,27 @@ def main() -> None:
         help="PR 대상 브랜치 (--auto-pr 사용 시, 기본값: main)",
     )
     pr_group.add_argument(
+        "--pr-title",
+        default="",
+        help="PR 제목 직접 지정 (--auto-pr로 새 PR 생성 시)",
+    )
+    pr_group.add_argument(
+        "--pr-number",
+        type=int,
+        default=None,
+        help="새 PR을 만들지 않고 기존 PR 번호의 리뷰를 처리 (--auto-pr 사용 시)",
+    )
+    pr_group.add_argument(
+        "--pr-current-pr",
+        action="store_true",
+        help="현재 브랜치에 연결된 기존 PR 리뷰를 처리 (--auto-pr 사용 시)",
+    )
+    pr_group.add_argument(
+        "--pr-no-poll",
+        action="store_true",
+        help="PR 리뷰 코멘트 폴링 비활성화 (--auto-pr 사용 시)",
+    )
+    pr_group.add_argument(
         "--pr-skip-review",
         action="store_true",
         help="PR 생성 후 리뷰 수집/반영 단계 건너뛰기 (--auto-pr 사용 시)",
@@ -201,6 +233,8 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
     args = parser.parse_args()
+    if args.pr_number is not None and args.pr_current_pr:
+        parser.error("--pr-number와 --pr-current-pr는 함께 사용할 수 없습니다.")
     setup_logging(args.verbose)
 
     if args.api_endpoint:

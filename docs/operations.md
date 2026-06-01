@@ -19,6 +19,9 @@ pip install -e ".[dev]"
 | `harness --mode modify --use-headless-phases "수정 요청"` | Phase별 `claude --print` 실행 |
 | `harness --mode modify --use-headless-phases --allow-empty-docs-diff "..."` | 문서 변경이 없는 예외 작업 |
 | `harness --mode modify --use-headless-phases --auto-pr --pr-base main "..."` | 구현 → PR → 리뷰 반영. 팀 allow 밖 GitHub 쓰기(리뷰 답글/머지)는 건너뜀 |
+| `harness --mode modify --auto-pr --pr-number 123 --pr-no-poll "..."` | 새 PR 생성 없이 기존 PR #123 리뷰 처리 |
+| `harness --mode modify --auto-pr --pr-current-pr --pr-no-poll "..."` | 현재 브랜치에 연결된 기존 PR 리뷰 처리 |
+| `harness --mode modify --use-headless-phases --auto-pr --pr-title "제목" "..."` | 새 PR 제목 직접 지정 |
 | `harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-confirm-github-writes "..."` | 리뷰 답글까지 명시 승인 |
 | `harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge --pr-confirm-github-writes "..."` | 답글과 머지까지 명시 승인 |
 | `harness --resume` | 현재 디렉터리 체크포인트 재개 |
@@ -57,6 +60,7 @@ pip install -e ".[dev]"
 | `harness-init --only coderabbit --offline "GitHub 리뷰 자동화"` | CodeRabbit 설정 파일만 생성 |
 | `harness-init --force --only claude --offline "운영 가이드 갱신"` | 덮어쓰기 |
 | `harness-init --dry-run --offline "사전 검토"` | 미리보기 |
+| `harness-init --migrate --offline "기존 Python 서비스"` | 기존 프로젝트의 하네스 필수 구조 보강 |
 
 ### 스크립트 직접 실행
 | 사용법 | 의미 |
@@ -80,10 +84,10 @@ pip install -e ".[dev]"
 
 ## 4. PR 자동화 운영
 - `run_harness.py --auto-pr` 사용 시 구현 성공 후 PR 파이프라인을 이어 실행한다.
-- `--pr-base`, `--pr-skip-review`, `--pr-auto-merge`, `--pr-confirm-github-writes`로 동작 제어. 통과 스프린트가 0개면 PR 단계를 건너뛴다.
+- `--pr-base`, `--pr-title`, `--pr-number`, `--pr-current-pr`, `--pr-no-poll`, `--pr-skip-review`, `--pr-auto-merge`, `--pr-confirm-github-writes`로 동작 제어. 통과 스프린트가 0개면 PR 단계를 건너뛴다.
 - PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다.
 - `scripts/auto_pr_pipeline.py`는 단독 실행 가능: 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영까지 기본 수행한다. 리뷰 답글(`gh api --method POST`)과 선택적 머지(`gh pr merge`)는 `--confirm-github-writes`가 있을 때만 실행한다.
-- 기존 PR은 `--pr-number <N>` 또는 `--current-pr`로 새 PR 생성 없이 처리한다.
+- 기존 PR은 단독 파이프라인에서 `--pr-number <N>` 또는 `--current-pr`로, `harness --auto-pr`에서는 `--pr-number <N>` 또는 `--pr-current-pr`로 새 PR 생성 없이 처리한다.
 - 리뷰 코멘트 판정: `ACCEPT` / `DEFER` / `IGNORE`. 명확한 bug/failure/regression/security/type error/필수 동작 누락만 `ACCEPT`하고, optional/nit/style/consider/could 제안은 `DEFER`한다. 파일/라인 존재만으로는 `ACCEPT`하지 않는다.
 - `ACCEPT`만 `claude --print` 리뷰 반영 세션에 전달하며, 리뷰 본문은 신뢰할 수 없는 외부 입력으로 fenced block에 격리한다.
 - 판정 로그: `.harness/review-artifacts/{branch}/review-comments.md`.

@@ -129,6 +129,7 @@ harness --mode modify "수정 요청"                     # modify 모드
 harness --mode modify --use-headless-phases "수정 요청"
 harness --mode modify --use-headless-phases --allow-empty-docs-diff "문서 변경 없는 수정 요청"
 harness --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"
+harness --mode modify --auto-pr --pr-current-pr --pr-no-poll "현재 PR 리뷰 반영"
 harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge --pr-confirm-github-writes "수정 요청"
 harness --resume
 harness --run-id <run_id>
@@ -142,6 +143,8 @@ create-pr-body --base main --output pr-body.md
 auto-pr-pipeline --help
 auto-pr-pipeline --base main
 auto-pr-pipeline --base main --auto-merge --confirm-github-writes
+auto-pr-pipeline --pr-number 123 --no-poll
+auto-pr-pipeline --current-pr --no-poll
 
 # === harness-init (= python3 scripts/init_harness.py) ===
 harness-init --help
@@ -149,8 +152,11 @@ harness-init --offline "사내 청구 자동화 도구"
 harness-init --project-dir ./billing --offline "PoC"
 harness-init --only adr,policy --offline "데이터 파이프라인"
 harness-init --only claude-config --offline "팀 셋업만 배포"   # .claude/settings.json + Stop 훅
+harness-init --with-coderabbit --offline "GitHub PR 리뷰 자동화"
+harness-init --only coderabbit --offline "CodeRabbit 설정만 배포"
 harness-init --force --only claude --offline "운영 가이드 갱신"
 harness-init --dry-run --offline "사전 검토"
+harness-init --migrate --offline "기존 Python 서비스에 하네스 적용"
 
 # === 스크립트 직접 실행 (CLI 단축 명령 없음) ===
 python3 scripts/run_phases.py --sprint 1
@@ -246,7 +252,7 @@ GitHub review thread resolve는 REST API 제약으로 답글 기반 확인으로
 `run_harness.py`에 `--auto-pr`을 붙이면 구현 성공 후 `auto_pr_pipeline.run_pipeline()`을 자동 호출한다.
 - 통과한 스프린트가 1개 이상인 경우에만 PR 파이프라인이 실행된다.
 - PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다.
-- `--pr-base`, `--pr-skip-review`, `--pr-auto-merge`, `--pr-confirm-github-writes`로 PR 동작을 제어한다.
+- `--pr-base`, `--pr-title`, `--pr-number`, `--pr-current-pr`, `--pr-no-poll`, `--pr-skip-review`, `--pr-auto-merge`, `--pr-confirm-github-writes`로 PR 동작을 제어한다.
 
 ### CodeRabbit 연동 규약
 - CodeRabbit은 하네스 내부 에이전트가 아니라 GitHub PR에 코멘트를 남기는 외부 리뷰어다.

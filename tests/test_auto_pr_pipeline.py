@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
+import pytest
+
+from scripts import auto_pr_pipeline
 from scripts.auto_pr_pipeline import (
     PipelineError,
     PipelineResult,
@@ -278,6 +282,19 @@ class TestPipelineResult:
         assert len(result.actionable_comments) == 1
         assert result.review_applied
         assert result.replies_posted == 1
+
+
+def test_main_rejects_ambiguous_existing_pr_options() -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["auto_pr_pipeline.py", "--pr-number", "42", "--current-pr"],
+        ),
+        patch("scripts.auto_pr_pipeline.enforce_structure_gate"),
+        pytest.raises(SystemExit),
+    ):
+        auto_pr_pipeline.main()
 
 
 class TestReviewReplies:

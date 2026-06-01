@@ -7,6 +7,8 @@
 사용 예:
     harness-init "사내 청구 자동화 도구를 만들고 있다" --project-dir ./billing
     harness-init --offline --only adr,policy "데이터 파이프라인 PoC"
+    harness-init --with-coderabbit --offline "GitHub PR 리뷰 자동화"
+    harness-init --migrate --offline "기존 Python 서비스에 하네스 적용"
     harness-init --force --dry-run "스토어 백엔드 개편"
 """
 

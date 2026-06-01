@@ -100,6 +100,80 @@ def test_main_passes_headless_phase_options_to_config(tmp_path: Path) -> None:
     assert config.require_docs_diff_for_headless is False
 
 
+def test_main_passes_auto_pr_options_to_pipeline(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "수정",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "run_harness.py",
+                "--project-dir",
+                str(project_dir),
+                "--auto-pr",
+                "--pr-base",
+                "develop",
+                "--pr-title",
+                "docs: sync cli docs",
+                "--pr-number",
+                "42",
+                "--pr-no-poll",
+                "--pr-skip-review",
+                "문서를 맞춰줘",
+            ],
+        ),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+        patch("scripts.auto_pr_pipeline.run_pipeline") as mock_run_pipeline,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+        mock_run_pipeline.return_value = MagicMock(
+            pr_info=MagicMock(url="https://example.test/pr/42"),
+            review_comments=[],
+            actionable_comments=[],
+            review_applied=False,
+            replies_posted=0,
+            merged=False,
+            warnings=[],
+            errors=[],
+        )
+
+        run_harness.main()
+
+    mock_run_pipeline.assert_called_once_with(
+        project_dir.resolve(),
+        "develop",
+        title="docs: sync cli docs",
+        skip_review=True,
+        auto_merge=False,
+        poll_reviews=False,
+        pr_number=42,
+        current_pr=False,
+        confirm_github_writes=False,
+    )
+
+
+def test_main_rejects_ambiguous_existing_pr_options() -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["run_harness.py", "--auto-pr", "--pr-number", "42", "--pr-current-pr", "수정"],
+        ),
+        pytest.raises(SystemExit),
+    ):
+        run_harness.main()
+
+
 def test_main_passes_mode_to_config(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     summary = {

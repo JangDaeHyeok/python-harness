@@ -7,6 +7,8 @@ Git 커밋 → PR 생성 → 리뷰 수집 → 에이전트 리뷰 반영까지 
     python3 scripts/auto_pr_pipeline.py --base main --confirm-github-writes
     python3 scripts/auto_pr_pipeline.py --base main --auto-merge --confirm-github-writes
     python3 scripts/auto_pr_pipeline.py --base main --skip-review
+    python3 scripts/auto_pr_pipeline.py --pr-number 123 --no-poll
+    python3 scripts/auto_pr_pipeline.py --current-pr --no-poll
 """
 
 from __future__ import annotations
@@ -679,6 +681,8 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
     args = parser.parse_args()
+    if args.pr_number is not None and args.current_pr:
+        parser.error("--pr-number와 --current-pr는 함께 사용할 수 없습니다.")
     setup_logging(args.verbose)
 
     project_dir = Path(args.project_dir).resolve()
