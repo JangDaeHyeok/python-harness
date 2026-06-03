@@ -109,6 +109,16 @@ class TestPhaseManager:
         assert "harness/**" not in core_phase.allowed_files
         assert "mypy myapp" in validation_phase.verification
 
+    def test_create_phases_uses_src_layout_package_dir(self, tmp_path: Path) -> None:
+        policy = ProjectPolicy(package="myapp", source_root="src")
+        mgr = PhaseManager(tmp_path, policy=policy)
+        index = mgr.create_phases(1, "src 레이아웃 테스트")
+
+        core_phase = index.phases[1]
+        validation_phase = index.phases[-1]
+        assert "src/myapp/**" in core_phase.allowed_files
+        assert "mypy src/myapp" in validation_phase.verification
+
     def test_create_phases_custom(self, tmp_path: Path) -> None:
         mgr = PhaseManager(tmp_path)
         custom = [("a", "Phase A", "Desc A"), ("b", "Phase B", "Desc B")]

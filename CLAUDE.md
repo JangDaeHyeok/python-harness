@@ -12,7 +12,7 @@ AI 코딩 에이전트를 위한 하네스 엔지니어링 프레임워크.
 - 모든 아키텍처 결정은 `docs/adr/`에 기록.
 - `harness/` 내부에서 `print()` 사용 금지, `logging` 모듈 사용.
 - 셸 명령은 `harness/tools/shell.py`의 `run_command_safe`, `validate_command` 사용.
-- 파일 경로 접근은 `harness/tools/path_safety.py`의 `validate_path`로 검증.
+- 파일 경로 접근은 `harness/tools/shell.py`의 `validate_path`로 프로젝트 디렉터리 봉쇄를 검증.
 - LLM 응답 파싱 실패 시 안전한 기본값으로 폴백 (예외 전파 금지).
 - 모든 public 함수에 타입 힌트 필수, `__init__`에서 부수 효과 금지.
 - 헤드리스 Phase 실행에서는 문서 업데이트 Phase를 먼저 실행하고 docs-diff를 갱신한다.
@@ -33,7 +33,7 @@ harness/
 ```
 
 ## 문서 맵
-- `docs/adr/` — Architecture Decision Records (0001~0013). 신규 작성 시 `.claude/skills/adr-author/SKILL.md` 참조.
+- `docs/adr/` — Architecture Decision Records (0001~0014). 신규 작성 시 `.claude/skills/adr-author/SKILL.md` 참조.
 - `docs/code-convention.yaml` — 코드 컨벤션 (ConventionLoader).
 - `harness_structure.yaml` — 자동 검증되는 아키텍처 규칙.
 - `docs/operations.md` — CLI 사용법·운영 가이드 (명령어/플래그 전반).
@@ -60,6 +60,7 @@ harness/
 - `auto-pr-pipeline` → `scripts.auto_pr_pipeline:main`
 - `create-pr-body` → `scripts.create_pr_body:main`
 - `harness-init` → `scripts.init_harness:main`
+- `harness-doctor` → `scripts.doctor:main`
 
 ## ADR 목록
-0001 3-에이전트 / 0002 연산적 센서 우선 / 0003 ADR 기반 아키텍처 규칙 / 0004 리뷰 산출물 워크플로 / 0005 구조화 스프린트 계약 / 0006 체크포인트와 재개 / 0007 가이드 레지스트리 / 0008 수정 모드와 프로젝트 정책 / 0009 Phase 실행과 컨텍스트 격리 / 0010 외부 프로젝트 고정 구조 강제 / 0011 harness-init 마이그레이션 모드 / 0012 결정적 파이프라인 평가 게이트 / 0013 argv 명령 경계와 Phase 완료 게이트. 상세 내용은 `docs/adr/`.
+0001 3-에이전트 / 0002 연산적 센서 우선 / 0003 ADR 기반 아키텍처 규칙 / 0004 리뷰 산출물 워크플로 / 0005 구조화 스프린트 계약 / 0006 체크포인트와 재개 / 0007 가이드 레지스트리 / 0008 수정 모드와 프로젝트 정책 / 0009 Phase 실행과 컨텍스트 격리 / 0010 외부 프로젝트 고정 구조 강제 / 0011 harness-init 마이그레이션 모드 / 0012 결정적 파이프라인 평가 게이트 / 0013 argv 명령 경계와 Phase 완료 게이트 / 0014 src 레이아웃과 project.source_root. 상세 내용은 `docs/adr/`.

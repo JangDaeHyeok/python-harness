@@ -27,19 +27,32 @@ class TemplateContext:
     project_name: str
     intent_summary: str
     package: str = "harness"
+    source_root: str = ""
     adr_path: str = "docs/adr/0001-initial-architecture.md"
     language: str = "python"
     python_version: str = "3.11+"
     today: str = field(default_factory=_today_iso)
+
+    @property
+    def package_dir(self) -> str:
+        """src 레이아웃을 반영한 패키지 디렉터리 상대 경로."""
+        root = self.source_root.strip().strip("/")
+        package = self.package or "harness"
+        return f"{root}/{package}" if root else package
 
     def as_mapping(self) -> dict[str, str]:
         return {
             "project_name": self.project_name or "my-project",
             "intent_summary": self.intent_summary or "프로젝트 목적이 아직 정의되지 않았습니다.",
             "package": self.package or "harness",
+            "package_dir": self.package_dir,
+            "source_root": self.source_root,
+            "source_root_yaml": f"\n  source_root: {self.source_root}" if self.source_root.strip() else "",
             "adr_path": self.adr_path or "docs/adr/0001-initial-architecture.md",
             "language": self.language,
             "python_version": self.python_version,
+            "python_min": self.python_version.rstrip("+ ").strip() or "3.11",
+            "packages_where": self.source_root.strip().strip("/") or ".",
             "today": self.today or _today_iso(),
         }
 
@@ -146,7 +159,7 @@ rules:
     type: forbidden_pattern
     pattern: '^\\s*print\\('
     directories:
-      - {package}
+      - {package_dir}
     message: "print() 대신 logging을 사용하세요"
     severity: error
 """
@@ -155,7 +168,7 @@ _POLICY_TEMPLATE = """\
 project:
   name: {project_name}
   # 이 프로젝트의 메인 패키지 디렉토리명. 필수.
-  package: {package}
+  package: {package}{source_root_yaml}
   language: {language}
   python_version: '{python_version}'
 policies:
@@ -181,7 +194,7 @@ policies:
     coderabbit: false
   commands:
     lint: ruff check .
-    type: mypy {package}
+    type: mypy {package_dir}
     test: pytest
     structure: python3 scripts/check_structure.py
   min_coverage:
@@ -400,9 +413,149 @@ fi
 """
 
 
+_PYPROJECT_TEMPLATE = """\
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{project_name}"
+version = "0.1.0"
+description = "{project_name} 프로젝트"
+requires-python = ">={python_min}"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["{packages_where}"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "{python_min}"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+"""
+
+_GITIGNORE_TEMPLATE = """\
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# 도구 캐시
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 하네스 런타임 산출물
+.harness/checkpoints/
+
+# 에디터/OS
+.idea/
+.vscode/
+.DS_Store
+"""
+
+_CI_TEMPLATE = """\
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '{python_min}'
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check .
+      - name: Mypy
+        run: mypy {package_dir}
+      - name: Structure
+        run: |
+          if [ -f scripts/check_structure.py ]; then
+            python3 scripts/check_structure.py
+          else
+            echo "scripts/check_structure.py 없음 — 구조 검사 생략"
+          fi
+      - name: Pytest
+        run: pytest
+"""
+
+_SMOKE_TEST_TEMPLATE = """\
+\"\"\"스모크 테스트: 패키지가 정상적으로 import 되는지 확인한다.\"\"\"
+
+from __future__ import annotations
+
+import importlib
+
+
+def test_package_imports() -> None:
+    module = importlib.import_module("{package}")
+    assert module is not None
+"""
+
+_PACKAGE_INIT_TEMPLATE = """\
+\"\"\"{project_name} 패키지.\"\"\"
+
+__version__ = "0.1.0"
+"""
+
+
 def render_adr(ctx: TemplateContext) -> str:
     """기본 ADR 마크다운을 렌더링한다."""
     return _ADR_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_pyproject(ctx: TemplateContext) -> str:
+    """기본 pyproject.toml을 렌더링한다 (dev 의존성: ruff/mypy/pytest)."""
+    return _PYPROJECT_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_gitignore(ctx: TemplateContext) -> str:
+    """기본 .gitignore를 렌더링한다."""
+    return _GITIGNORE_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_ci(ctx: TemplateContext) -> str:
+    """ruff/mypy/structure/pytest를 실행하는 GitHub Actions CI를 렌더링한다."""
+    return _CI_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_smoke_test(ctx: TemplateContext) -> str:
+    """패키지 import를 확인하는 스모크 테스트를 렌더링한다."""
+    return _SMOKE_TEST_TEMPLATE.format_map(ctx.as_mapping())
+
+
+def render_package_init(ctx: TemplateContext) -> str:
+    """패키지 __init__.py를 렌더링한다."""
+    return _PACKAGE_INIT_TEMPLATE.format_map(ctx.as_mapping())
 
 
 def render_convention(ctx: TemplateContext) -> str:

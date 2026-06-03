@@ -28,16 +28,22 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.agents.orchestrator import HarnessConfig, HarnessOrchestrator
 from harness.context.structure_gate import check_structure, format_structure_violation
 from harness.tools.api_client import ENDPOINT_ENV_VAR
+from harness.tools.file_io import atomic_write_text
+
+if TYPE_CHECKING:
+    from scripts.auto_pr_pipeline import PipelineResult
 
 
 def _checkpoint_exists(project_dir: Path, resume_run_id: str) -> bool:
@@ -90,8 +96,33 @@ def should_enforce_structure_gate(mode: str, resume_run_id: str) -> bool:
     return mode == "modify" or bool(resume_run_id)
 
 
-def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
-    """구현 성공 후 PR 자동화 파이프라인을 실행한다."""
+def _save_auto_pr_artifact(
+    project_dir: Path, result: PipelineResult | None, pipeline_failed: str
+) -> None:
+    """PR 자동화 결과를 구현 결과와 분리해 artifact로 기록한다."""
+    artifact = {
+        "pipeline_failed": pipeline_failed,
+        "pr_url": result.pr_info.url if result else "",
+        "pr_number": result.pr_info.number if result else 0,
+        "review_comments": len(result.review_comments) if result else 0,
+        "actionable_comments": len(result.actionable_comments) if result else 0,
+        "review_applied": result.review_applied if result else False,
+        "replies_posted": result.replies_posted if result else 0,
+        "merged": result.merged if result else False,
+        "warnings": list(result.warnings) if result else [],
+        "errors": list(result.errors) if result else [],
+    }
+    artifact_path = project_dir / ".harness" / "artifacts" / "auto-pr-result.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(
+        artifact_path, json.dumps(artifact, ensure_ascii=False, indent=2)
+    )
+
+
+def _run_auto_pr(
+    project_dir: Path, args: argparse.Namespace
+) -> PipelineResult | None:
+    """구현 성공 후 PR 자동화 파이프라인을 실행하고 결과를 반환한다."""
     from scripts.auto_pr_pipeline import PipelineError, run_pipeline
 
     logger = logging.getLogger(__name__)
@@ -113,7 +144,12 @@ def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
         )
     except PipelineError as e:
         logger.error("PR 파이프라인 실패: %s", e)
-        return
+        print("\n" + "!" * 60)
+        print(f"  [PR 자동화 실패] {e}")
+        print("  구현은 완료되었으나 PR 파이프라인이 중단되었습니다.")
+        print("!" * 60)
+        _save_auto_pr_artifact(project_dir, None, pipeline_failed=str(e))
+        return None
 
     print(f"\n  PR: {result.pr_info.url or '생성 실패'}")
     print(f"  리뷰 코멘트: {len(result.review_comments)}개")
@@ -123,8 +159,17 @@ def _run_auto_pr(project_dir: Path, args: argparse.Namespace) -> None:
     print(f"  머지: {'완료' if result.merged else '미실행'}")
     if result.warnings:
         logger.warning("PR 파이프라인 주의: %s", "; ".join(result.warnings))
+        for warning in result.warnings:
+            print(f"  [주의] {warning}")
     if result.errors:
         logger.warning("PR 파이프라인 오류: %s", "; ".join(result.errors))
+        print("\n" + "!" * 60)
+        for error in result.errors:
+            print(f"  [PR 오류] {error}")
+        print("!" * 60)
+
+    _save_auto_pr_artifact(project_dir, result, pipeline_failed="")
+    return result
 
 
 def main() -> None:
@@ -230,6 +275,14 @@ def main() -> None:
             "--auto-pr 흐름에서 명시적으로 승인"
         ),
     )
+    pr_group.add_argument(
+        "--fail-on-pr-error",
+        action="store_true",
+        help=(
+            "PR 자동화가 실패하거나 오류를 기록하면 종료 코드 1로 종료 "
+            "(구현 자체는 성공해도 PR 단계 실패를 CI에서 감지하려는 경우)"
+        ),
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
     args = parser.parse_args()
@@ -283,7 +336,11 @@ def main() -> None:
         print("=" * 60)
 
         if args.auto_pr and summary.get("passed_sprints", 0) > 0:
-            _run_auto_pr(project_dir, args)
+            pr_result = _run_auto_pr(project_dir, args)
+            if args.fail_on_pr_error and (
+                pr_result is None or pr_result.errors
+            ):
+                sys.exit(1)
         elif args.auto_pr:
             logging.getLogger(__name__).warning(
                 "통과한 스프린트가 없어 PR 자동화를 건너뜁니다."

@@ -137,7 +137,7 @@ def test_main_passes_auto_pr_options_to_pipeline(tmp_path: Path) -> None:
         mock_orchestrator.run.return_value = summary
         mock_orchestrator_cls.return_value = mock_orchestrator
         mock_run_pipeline.return_value = MagicMock(
-            pr_info=MagicMock(url="https://example.test/pr/42"),
+            pr_info=MagicMock(url="https://example.test/pr/42", number=42),
             review_comments=[],
             actionable_comments=[],
             review_applied=False,
@@ -160,6 +160,111 @@ def test_main_passes_auto_pr_options_to_pipeline(tmp_path: Path) -> None:
         current_pr=False,
         confirm_github_writes=False,
     )
+
+
+def _auto_pr_argv(project_dir: Path, *extra: str) -> list[str]:
+    return [
+        "run_harness.py",
+        "--project-dir",
+        str(project_dir),
+        "--auto-pr",
+        *extra,
+        "수정해줘",
+    ]
+
+
+def _pipeline_result(errors: list[str]) -> MagicMock:
+    return MagicMock(
+        pr_info=MagicMock(url="https://example.test/pr/1", number=1),
+        review_comments=[],
+        actionable_comments=[],
+        review_applied=False,
+        replies_posted=0,
+        merged=False,
+        warnings=[],
+        errors=errors,
+    )
+
+
+def test_auto_pr_records_artifact(tmp_path: Path) -> None:
+    """PR 자동화 결과는 별도 artifact로 기록된다."""
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "수정",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(sys, "argv", _auto_pr_argv(project_dir)),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+        patch("scripts.auto_pr_pipeline.run_pipeline") as mock_run_pipeline,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+        mock_run_pipeline.return_value = _pipeline_result(errors=[])
+
+        run_harness.main()
+
+    artifact = project_dir.resolve() / ".harness" / "artifacts" / "auto-pr-result.json"
+    assert artifact.exists()
+
+
+def test_auto_pr_errors_exit_nonzero_with_flag(tmp_path: Path) -> None:
+    """--fail-on-pr-error 사용 시 PR 오류가 있으면 종료 코드 1."""
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "수정",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(sys, "argv", _auto_pr_argv(project_dir, "--fail-on-pr-error")),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+        patch("scripts.auto_pr_pipeline.run_pipeline") as mock_run_pipeline,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+        mock_run_pipeline.return_value = _pipeline_result(errors=["push 실패: x"])
+
+        run_harness.main()
+
+    assert exc_info.value.code == 1
+
+
+def test_auto_pr_errors_exit_zero_without_flag(tmp_path: Path) -> None:
+    """플래그 없으면 PR 오류가 있어도 종료 코드 0(기록만)."""
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "수정",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(sys, "argv", _auto_pr_argv(project_dir)),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+        patch("scripts.auto_pr_pipeline.run_pipeline") as mock_run_pipeline,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+        mock_run_pipeline.return_value = _pipeline_result(errors=["push 실패: x"])
+
+        run_harness.main()
+
+    artifact = project_dir.resolve() / ".harness" / "artifacts" / "auto-pr-result.json"
+    assert artifact.exists()
 
 
 def test_main_rejects_ambiguous_existing_pr_options() -> None:

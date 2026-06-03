@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.bootstrap.initializer import (
     ALL_TARGETS,
+    SCAFFOLD_TARGETS,
     SUPPORTED_TARGETS,
     BootstrapInitializer,
     TargetKind,
@@ -107,6 +108,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--scaffold",
+        action="store_true",
+        help=(
+            "새 Python 프로젝트 골격(pyproject.toml, 패키지 __init__.py, "
+            "tests/test_smoke.py, .gitignore, .github/workflows/ci.yml)도 함께 생성한다."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="이미 존재하는 파일도 덮어쓴다",
@@ -146,6 +155,10 @@ def main() -> None:
     targets = _parse_targets(args.only)
     if args.with_coderabbit and TargetKind.CODERABBIT not in targets:
         targets.append(TargetKind.CODERABBIT)
+    if args.scaffold:
+        for kind in SCAFFOLD_TARGETS:
+            if kind not in targets:
+                targets.append(kind)
     client = _resolve_client(args.offline, args.api_endpoint)
 
     initializer = BootstrapInitializer(

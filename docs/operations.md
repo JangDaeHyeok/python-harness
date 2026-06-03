@@ -61,6 +61,15 @@ pip install -e ".[dev]"
 | `harness-init --force --only claude --offline "운영 가이드 갱신"` | 덮어쓰기 |
 | `harness-init --dry-run --offline "사전 검토"` | 미리보기 |
 | `harness-init --migrate --offline "기존 Python 서비스"` | 기존 프로젝트의 하네스 필수 구조 보강 |
+| `harness-init --scaffold --offline "새 Python 도구"` | 규칙 파일 + Python 골격(pyproject/패키지/테스트/.gitignore/CI) 함께 생성 |
+| `harness-init --only pyproject,ci --offline "..."` | 골격 중 특정 파일만 생성 |
+
+### `harness-doctor` (= `python3 scripts/doctor.py`)
+| 사용법 | 의미 |
+|--------|------|
+| `harness-doctor` | 현재 디렉터리의 GitHub/Python 준비 상태 점검 |
+| `harness-doctor --project-dir ./billing` | 다른 디렉터리 점검 |
+| `harness-doctor --api-endpoint https://...` | API 엔드포인트 설정까지 함께 점검 |
 
 ### 스크립트 직접 실행
 | 사용법 | 의미 |
@@ -85,10 +94,12 @@ pip install -e ".[dev]"
 ## 4. PR 자동화 운영
 - `run_harness.py --auto-pr` 사용 시 구현 성공 후 PR 파이프라인을 이어 실행한다.
 - `--pr-base`, `--pr-title`, `--pr-number`, `--pr-current-pr`, `--pr-no-poll`, `--pr-skip-review`, `--pr-auto-merge`, `--pr-confirm-github-writes`로 동작 제어. 통과 스프린트가 0개면 PR 단계를 건너뛴다.
-- PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다.
+- PR 파이프라인 실패는 구현 결과에 영향을 주지 않는다(구현 성공/ PR 실패는 분리 기록). PR 결과는 `.harness/artifacts/auto-pr-result.json`에 `{pr_url, review_applied, merged, warnings, errors}` 형태로 저장되고, 오류는 stdout에도 눈에 띄게 출력된다.
+- `--fail-on-pr-error`: 구현이 성공해도 PR 파이프라인이 중단되거나 오류를 기록하면 종료 코드 1로 끝낸다. CI에서 PR 단계 실패를 감지하려는 경우 사용한다.
 - `scripts/auto_pr_pipeline.py`는 단독 실행 가능: 현재 브랜치 push → PR 생성 → 리뷰 수집 → 리뷰 반영까지 기본 수행한다. 리뷰 답글(`gh api --method POST`)과 선택적 머지(`gh pr merge`)는 `--confirm-github-writes`가 있을 때만 실행한다.
 - 기존 PR은 단독 파이프라인에서 `--pr-number <N>` 또는 `--current-pr`로, `harness --auto-pr`에서는 `--pr-number <N>` 또는 `--pr-current-pr`로 새 PR 생성 없이 처리한다.
 - 리뷰 코멘트 판정: `ACCEPT` / `DEFER` / `IGNORE`. 명확한 bug/failure/regression/security/type error/필수 동작 누락만 `ACCEPT`하고, optional/nit/style/consider/could 제안은 `DEFER`한다. 파일/라인 존재만으로는 `ACCEPT`하지 않는다.
+- 키워드 매칭은 단어 경계 기준이라 `debug`/`bugfix done` 같은 부분일치는 ACCEPT로 오분류되지 않는다. CodeRabbit 본문의 `⚠️ Potential issue`/`_critical_`는 ACCEPT, `🧹 Nitpick`/`🛠️ Refactor`는 DEFER 가중 신호로 쓴다. `author_association`(MEMBER/OWNER/COLLABORATOR)은 신뢰 가중으로 사유에만 기록하며 단독으로 ACCEPT를 만들지 않는다.
 - `ACCEPT`만 `claude --print` 리뷰 반영 세션에 전달하며, 리뷰 본문은 신뢰할 수 없는 외부 입력으로 fenced block에 격리한다.
 - 판정 로그: `.harness/review-artifacts/{branch}/review-comments.md`.
 - 리뷰 반영 전 dirty worktree가 있으면 실패한다. 반영 커밋은 자동화 중 변경된 파일만 stage한다. 원본 리뷰 코멘트 한국어 답글은 성공적으로 push되고 `--confirm-github-writes`가 명시된 경우에만 남긴다.
@@ -122,6 +133,15 @@ pip install -e ".[dev]"
 - LLM 호출 실패나 응답 검증 실패 시 내장 템플릿으로 안전 폴백.
 - 프로젝트 이름은 따옴표로 감싼 토큰을 우선, 없으면 디렉터리명을 정규화.
 - `harness-init`은 초기 환경 구성용. 본격 수정·생성은 `harness` CLI 사용.
+- `--scaffold`는 규칙 파일 외에 Python 프로젝트 골격(`pyproject.toml`, `<package>/__init__.py` 또는 `src/<package>/__init__.py`, `tests/test_smoke.py`, `.gitignore`, `.github/workflows/ci.yml`)을 함께 생성한다. `--only pyproject,ci`처럼 골격 일부만 지정할 수도 있다. CI 템플릿의 검사 명령은 정책(`ruff check .`, `mypy {package_dir}`, structure, pytest)과 일치하며, 기존 파일은 보존하고 `--force`로만 덮어쓴다.
+- src 레이아웃: 정책 `project.source_root: src`가 있으면 골격·구조 규칙·검증 명령이 모두 `src/<package>` 경로를 사용한다. `--migrate`는 루트와 `src/<package>`를 자동 탐지해 단일 후보면 `source_root`를 정책에 기록하고, 양쪽에 후보가 동시에 있으면 명시를 요구한다. 정책에 `source_root`가 이미 명시돼 있으면 해당 root만 탐색해 자동 탐지보다 우선하므로, 루트·src에 같은 패키지가 함께 있어도 명시 값이 유지된다. 자세한 결정은 `docs/adr/0014-src-layout-and-source-root.md`.
+
+## 5.1 사전 점검(harness-doctor) 운영
+- 하네스 실행 전 GitHub/Python 준비 상태를 점검하고, 실패 항목마다 한국어 원인 + 다음 조치를 출력한다.
+- 점검 항목: git 저장소·origin 원격·현재 브랜치·기본(base) 브랜치, `git`/`gh`/`ruff`/`mypy`/`pytest`/`claude` 설치, `gh` 인증, `HARNESS_API_ENDPOINT` 설정, `.harness/project-policy.yaml`/`harness_structure.yaml`/`docs/code-convention.yaml`/`docs/adr/*.md` 존재.
+- 현재 브랜치 점검은 detached HEAD 상태(브랜치가 아님)를 실패로 처리한다. PR 자동화는 실제 브랜치를 요구하므로 작업 전에 체크아웃/생성하도록 안내한다.
+- 실패가 하나라도 있으면 종료 코드 1로 끝난다(CI 사전 게이트로 사용 가능).
+- 점검에 쓰는 git/gh 호출은 읽기 전용(`git remote`, `git rev-parse`, `gh auth status`)만 허용된다.
 
 ## 6. 프로젝트 정책 파일(`.harness/project-policy.yaml`)
 - 파일이 없거나 파싱 실패 시 기본 정책 사용.
@@ -131,6 +151,9 @@ pip install -e ".[dev]"
   `commands.test: pytest`, `commands.structure: python3 scripts/check_structure.py`,
   `min_coverage: 80`, `package_manager: pip`,
   `pytest: {timeout: 300, coverage: true}`.
+- `project.source_root`(예: `src`)로 패키지 레이아웃을 표현한다. 빈 값은 flat 루트(`<package>/`), `src`는 `src/<package>/`를 의미하며 구조 게이트·Phase·검증 명령이 이 값을 따른다.
+- 정책 입력은 신뢰 대상이 아니다. `harness-init`은 `source_root`/`package`로 파생되는 모든 쓰기 경로를 `validate_path`로 검증하며, 프로젝트 디렉터리를 벗어나는 값(`../`, 절대경로 등)은 거부한다.
+- modify 모드의 검증 요약은 `commands.lint`/`commands.type`를 사용한다. 정책이 없으면 `ruff check .`/`mypy <package_dir>`로 폴백하고, allowlist 밖 명령(ruff/mypy/pytest/python 외)은 안전하게 생략한다.
 - 기본 문서 경로: `docs/code-convention.yaml`, `docs/adr/`, `harness_structure.yaml`.
 - `custom_rules`는 `type`, `pattern`, `message` 등을 가진 목록이며 LinterSensor까지 전달된다.
 - `adr.external_sources`로 외부 프로젝트 ADR 디렉터리 지정 가능. 존재하지 않거나 디렉터리가 아니면 건너뜀(오류 없음).

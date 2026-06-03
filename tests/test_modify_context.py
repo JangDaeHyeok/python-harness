@@ -227,6 +227,44 @@ class TestModifyContextCollector:
 
         assert ctx.code_convention == "default: true"
 
+    def test_recent_test_summary_uses_policy_commands(self, tmp_path: Path) -> None:
+        """검증 요약은 정책의 lint/type 명령을 실행한다."""
+        from harness.context.project_policy import ProjectPolicy, ValidationCommands
+
+        policy = ProjectPolicy(
+            commands=ValidationCommands(lint="ruff check .", type="mypy src/app")
+        )
+        collector = ModifyContextCollector(tmp_path)
+        with patch.object(collector, "_run_cmd", return_value="") as run_cmd:
+            collector._get_recent_test_summary(policy)
+
+        called = {args for args, _ in run_cmd.call_args_list}
+        assert ("ruff", "check", ".") in called
+        assert ("mypy", "src/app") in called
+
+    def test_recent_test_summary_defaults_without_policy(self, tmp_path: Path) -> None:
+        """정책이 없으면 기본 ruff/mypy 명령으로 폴백한다."""
+        collector = ModifyContextCollector(tmp_path)
+        with patch.object(collector, "_run_cmd", return_value="") as run_cmd:
+            collector._get_recent_test_summary(None)
+
+        called = {args for args, _ in run_cmd.call_args_list}
+        assert ("ruff", "check", ".") in called
+        assert ("mypy", "harness") in called
+
+    def test_recent_test_summary_skips_disallowed_command(self, tmp_path: Path) -> None:
+        """allowlist 밖 명령은 실행되지 않고 안전하게 생략된다(None)."""
+        from harness.context.project_policy import ProjectPolicy, ValidationCommands
+
+        policy = ProjectPolicy(
+            commands=ValidationCommands(lint="rm -rf .", type="")
+        )
+        collector = ModifyContextCollector(tmp_path)
+        summary = collector._get_recent_test_summary(policy)
+
+        assert "Lint" not in summary
+        assert summary == ""
+
     def test_collect_python_project_summary(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").write_text(
             "\n".join([

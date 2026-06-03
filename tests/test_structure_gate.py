@@ -104,6 +104,24 @@ def test_check_structure_rejects_src_layout_when_root_package_missing(
     assert "app/" in report.missing
 
 
+def test_check_structure_accepts_src_layout_when_policy_declares_source_root(
+    tmp_path: Path,
+) -> None:
+    make_valid_project(tmp_path)
+    (tmp_path / "app").rmdir()
+    src_package = tmp_path / "src" / "app"
+    src_package.mkdir(parents=True)
+    (src_package / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / ".harness" / "project-policy.yaml").write_text(
+        "project:\n  name: test\n  package: app\n  source_root: src\n",
+        encoding="utf-8",
+    )
+
+    report = check_structure(tmp_path)
+
+    assert report.ok is True, report.missing
+
+
 def test_format_structure_violation_is_korean_user_facing(tmp_path: Path) -> None:
     report = check_structure(tmp_path)
 

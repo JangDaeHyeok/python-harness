@@ -371,7 +371,7 @@ class PhaseManager:
         id_suffix: str, policy: ProjectPolicy | None = None
     ) -> list[str]:
         active_policy = policy or ProjectPolicy()
-        package_glob = f"{active_policy.package}/**"
+        package_glob = f"{active_policy.package_dir}/**"
         if id_suffix == "docs-update":
             return ["docs/**", ".harness/review-artifacts/**", ".harness/tasks/**"]
         if id_suffix == "tests":
@@ -399,7 +399,7 @@ class PhaseManager:
     ) -> str:
         active_policy = policy or ProjectPolicy()
         if id_suffix == "validation":
-            return f"ruff check && mypy {active_policy.package} && python3 scripts/check_structure.py && pytest"
+            return f"ruff check && mypy {active_policy.package_dir} && python3 scripts/check_structure.py && pytest"
         if id_suffix == "tests":
             return "pytest"
         return "변경 범위에 맞는 관련 테스트를 실행하세요."

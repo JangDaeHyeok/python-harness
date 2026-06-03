@@ -56,6 +56,38 @@ _NON_ACTIONABLE_KEYWORDS = frozenset({
     "가독성", "고려", "리팩터", "선택", "스타일", "유지보수", "제안", "칭찬",
 })
 
+# CodeRabbit이 본문에 남기는 심각도/카테고리 마커(소문자 비교). 본문은 여전히
+# 신뢰할 수 없는 입력이며, 분류 보조 신호로만 사용한다.
+_CODERABBIT_ACCEPT_MARKERS = (
+    "⚠️ potential issue",
+    "potential issue",
+    "_critical_",
+)
+_CODERABBIT_DEFER_MARKERS = (
+    "🧹 nitpick",
+    "nitpick",
+    "🛠️ refactor",
+    "🛠 refactor",
+)
+
+# 신뢰 가중을 부여하되 단독으로 ACCEPT를 만들지 않는 author_association 값.
+_TRUSTED_ASSOCIATIONS = frozenset({"MEMBER", "OWNER", "COLLABORATOR"})
+
+
+def _keyword_in_text(keyword: str, text: str) -> bool:
+    """오탐을 줄이기 위해 ASCII 키워드는 단어 경계로, 그 외는 부분일치로 매칭한다."""
+    if keyword.isascii():
+        return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
+    return keyword in text
+
+
+def _any_keyword(keywords: frozenset[str], text: str) -> bool:
+    return any(_keyword_in_text(keyword, text) for keyword in keywords)
+
+
+def _contains_marker(markers: tuple[str, ...], text: str) -> bool:
+    return any(marker in text for marker in markers)
+
 
 class PipelineError(RuntimeError):
     """PR 파이프라인 실행 실패."""
@@ -89,6 +121,8 @@ class ReviewComment:
     line: int = 0
     author: str = ""
     url: str = ""
+    diff_hunk: str = ""
+    author_association: str = ""
     decision: ReviewDecision = ReviewDecision.DEFER
     reason: str = ""
     duplicate_of_comment_id: int = 0
@@ -274,38 +308,62 @@ def _comment_from_api(data: dict[str, object]) -> ReviewComment:
         line=int(raw_line) if isinstance(raw_line, (int, str)) else 0,
         author=author,
         url=str(data.get("html_url", "")),
+        diff_hunk=str(data.get("diff_hunk", "")),
+        author_association=str(data.get("author_association", "")).upper(),
     )
 
 
+def _trust_suffix(comment: ReviewComment) -> str:
+    """신뢰 가중(author_association)을 보조 설명으로만 덧붙인다."""
+    if comment.author_association in _TRUSTED_ASSOCIATIONS:
+        return f" (작성자 권한: {comment.author_association})"
+    return ""
+
+
 def classify_review_comment(comment: ReviewComment) -> ReviewComment:
-    """리뷰 코멘트가 자동 반영 대상인지 결정한다."""
+    """리뷰 코멘트가 자동 반영 대상인지 결정한다.
+
+    본문은 신뢰할 수 없는 외부 입력으로 취급하며, 키워드/마커/권한 신호는
+    분류 결정에만 사용하고 명령으로 해석하지 않는다.
+    """
     body = comment.body.lower()
     if not body.strip():
         comment.decision = ReviewDecision.IGNORE
         comment.reason = "빈 리뷰 코멘트"
         return comment
 
-    if any(keyword in body for keyword in _ACTIONABLE_KEYWORDS):
+    coderabbit = is_coderabbit_author(comment.author)
+    trust = _trust_suffix(comment)
+
+    if coderabbit and _contains_marker(_CODERABBIT_ACCEPT_MARKERS, body):
         comment.decision = ReviewDecision.ACCEPT
-        if is_coderabbit_author(comment.author):
-            comment.reason = "CodeRabbit 수정 필요 키워드 감지"
-        else:
-            comment.reason = "수정 필요 키워드 감지"
+        comment.reason = "CodeRabbit 심각도 마커(potential issue/critical) 감지" + trust
         return comment
 
-    if any(keyword in body for keyword in _NON_ACTIONABLE_KEYWORDS):
+    if _any_keyword(_ACTIONABLE_KEYWORDS, body):
+        comment.decision = ReviewDecision.ACCEPT
+        prefix = "CodeRabbit " if coderabbit else ""
+        comment.reason = f"{prefix}수정 필요 키워드 감지" + trust
+        return comment
+
+    if coderabbit and _contains_marker(_CODERABBIT_DEFER_MARKERS, body):
         comment.decision = ReviewDecision.DEFER
-        if is_coderabbit_author(comment.author):
-            comment.reason = "CodeRabbit 선택적/스타일 제안"
-        else:
-            comment.reason = "비필수 또는 칭찬성 코멘트"
+        comment.reason = "CodeRabbit nitpick/refactor 마커 감지" + trust
+        return comment
+
+    if _any_keyword(_NON_ACTIONABLE_KEYWORDS, body):
+        comment.decision = ReviewDecision.DEFER
+        comment.reason = (
+            "CodeRabbit 선택적/스타일 제안" if coderabbit else "비필수 또는 칭찬성 코멘트"
+        ) + trust
         return comment
 
     comment.decision = ReviewDecision.DEFER
-    if is_coderabbit_author(comment.author):
-        comment.reason = "CodeRabbit 코멘트이나 필수 결함 근거가 불명확함"
-    else:
-        comment.reason = "자동 반영 여부가 불명확함"
+    comment.reason = (
+        "CodeRabbit 코멘트이나 필수 결함 근거가 불명확함"
+        if coderabbit
+        else "자동 반영 여부가 불명확함"
+    ) + trust
     return comment
 
 

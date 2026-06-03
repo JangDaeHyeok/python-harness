@@ -61,6 +61,37 @@ def test_validate_command_rejects_shell_control_tokens() -> None:
         assert "셸 제어 토큰" in reason
 
 
+def test_validate_command_allows_doctor_read_only_commands() -> None:
+    """doctor가 쓰는 읽기 전용 git/gh 명령은 허용한다."""
+    allowed = [
+        "git remote",
+        "git rev-parse --abbrev-ref origin/HEAD",
+        "gh auth status",
+    ]
+
+    for command in allowed:
+        is_safe, reason = validate_command(command)
+
+        assert is_safe, reason
+
+
+def test_validate_command_blocks_mutating_remote_and_gh() -> None:
+    """git remote 변경 액션과 비인증 gh 명령은 차단한다."""
+    blocked = [
+        "git remote add origin https://example.invalid/x.git",
+        "git remote set-url origin https://example.invalid/y.git",
+        "gh pr create",
+        "gh auth login",
+        "gh auth token",
+        "gh auth status --show-token",
+    ]
+
+    for command in blocked:
+        is_safe, _ = validate_command(command)
+
+        assert not is_safe, command
+
+
 def test_validate_argv_uses_same_policy_as_string_commands() -> None:
     """argv API도 동일한 allowlist/denylist 정책을 적용한다."""
     is_safe, reason = validate_argv(["python3", "scripts/check_structure.py"])

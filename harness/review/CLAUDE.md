@@ -20,6 +20,7 @@
 - 반영 커밋이 push된 경우에만 원본 코멘트에 한국어 답글을 남긴다.
 - review thread resolve는 답글 기반 확인으로 대체 (GitHub API 제약).
 - CodeRabbit은 외부 리뷰어로 동일 분류 흐름을 탄다. optional/nit/칭찬성은 DEFER.
+- 분류 보조 신호(`scripts/auto_pr_pipeline.py`의 `classify_review_comment`): 액션 키워드는 단어 경계 매칭(`debug`가 `bug`로 오탐되지 않음), CodeRabbit `⚠️ Potential issue`/`_critical_`는 ACCEPT·`🧹 Nitpick`/`🛠️ Refactor`는 DEFER 가중, `author_association`(MEMBER/OWNER/COLLABORATOR)은 신뢰 가중이되 단독 ACCEPT 금지. 리뷰 본문은 계속 신뢰 불가 입력으로 취급(신호 추출에만 사용).
 
 ## 관련 ADR
 - 0004 리뷰 산출물 워크플로, 0009 Phase 실행과 컨텍스트 격리.

@@ -64,10 +64,27 @@ SAFE_GIT_SUBCOMMANDS = {
     "diff",
     "log",
     "ls-files",
+    "remote",
     "rev-parse",
     "show",
     "status",
 }
+
+# git remote의 읽기 전용 외 변경 액션은 차단한다.
+MUTATING_GIT_REMOTE_ACTIONS = {
+    "add",
+    "remove",
+    "rename",
+    "set-url",
+    "set-head",
+    "set-branches",
+    "prune",
+    "update",
+}
+
+# gh는 읽기 전용 인증 상태 조회만 허용한다. (token은 자격증명 노출이라 제외)
+SAFE_GH_SUBCOMMANDS = {"auth"}
+SAFE_GH_AUTH_ACTIONS = {"status"}
 
 SAFE_PYTHON_MODULES = {
     "mypy",
@@ -123,6 +140,26 @@ def _validate_git_argv(argv: Sequence[str]) -> tuple[bool, str]:
         return False, f"허용되지 않은 git 하위 명령입니다: {subcommand}"
     if subcommand == "reset" and "--hard" in argv:
         return False, "git reset --hard는 실행할 수 없습니다."
+    if subcommand == "remote":
+        for action in argv[2:]:
+            if action in MUTATING_GIT_REMOTE_ACTIONS:
+                return False, f"git remote 변경 액션은 실행할 수 없습니다: {action}"
+    return True, ""
+
+
+def _validate_gh_argv(argv: Sequence[str]) -> tuple[bool, str]:
+    """gh는 읽기 전용 인증 상태 조회만 허용한다."""
+    if len(argv) < 2:
+        return False, "gh 하위 명령이 필요합니다."
+    subcommand = argv[1]
+    if subcommand not in SAFE_GH_SUBCOMMANDS:
+        return False, f"허용되지 않은 gh 하위 명령입니다: {subcommand}"
+    if len(argv) < 3 or argv[2] not in SAFE_GH_AUTH_ACTIONS:
+        actions = ", ".join(sorted(SAFE_GH_AUTH_ACTIONS))
+        return False, f"gh auth는 다음 액션만 허용됩니다: {actions}"
+    if len(argv) > 3:
+        # --show-token 등 자격증명 노출 플래그를 막기 위해 추가 인자를 전부 거부한다.
+        return False, f"gh auth status에는 추가 인자를 사용할 수 없습니다: {argv[3]}"
     return True, ""
 
 
@@ -171,6 +208,8 @@ def _validate_allowed_argv(argv: Sequence[str]) -> tuple[bool, str]:
         return True, ""
     if command_name == "git":
         return _validate_git_argv(argv)
+    if command_name == "gh":
+        return _validate_gh_argv(argv)
     if command_name == "find":
         return _validate_find_argv(argv)
     if _is_python_command(command_name):

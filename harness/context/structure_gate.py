@@ -33,8 +33,8 @@ def check_structure(project_dir: Path) -> StructureReport:
     _require_dir(root, "tests/", missing)
     _require_dir(root, "scripts/", missing)
 
-    package = ProjectPolicyManager(root).load().package.strip() or "harness"
-    _require_dir(root, f"{package}/", missing)
+    package_dir = ProjectPolicyManager(root).load().package_dir
+    _require_dir(root, f"{package_dir}/", missing)
 
     return StructureReport(
         ok=not missing,

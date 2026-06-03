@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -164,7 +165,7 @@ class ModifyContextCollector:
             code_convention=self._read_file_safe(convention_path),
             adrs=adrs,
             structure_rules=self._read_file_safe(structure_path),
-            recent_test_summary=self._get_recent_test_summary(),
+            recent_test_summary=self._get_recent_test_summary(policy),
             project_policy=self._read_file_safe(
                 self.project_dir / ".harness" / "project-policy.yaml"
             ),
@@ -234,15 +235,34 @@ class ModifyContextCollector:
         sanitized = sanitize_branch_name(branch)
         return artifacts_dir / sanitized / "design-intent.md"
 
-    def _get_recent_test_summary(self) -> str:
+    def _get_recent_test_summary(self, policy: ProjectPolicy | None = None) -> str:
         parts: list[str] = []
-        ruff = self._run_cmd("ruff", "check", ".", "--quiet")
+        lint_cmd = policy.commands.lint if policy else "ruff check ."
+        type_cmd = policy.commands.type if policy else "mypy harness"
+        ruff = self._run_policy_cmd(lint_cmd)
         if ruff is not None:
-            parts.append(f"### Ruff\n{ruff or '에러 없음'}")
-        mypy = self._run_cmd("mypy", "harness", "--no-error-summary")
+            parts.append(f"### Lint\n{ruff or '에러 없음'}")
+        mypy = self._run_policy_cmd(type_cmd)
         if mypy is not None:
-            parts.append(f"### Mypy\n{mypy or '에러 없음'}")
+            parts.append(f"### Type\n{mypy or '에러 없음'}")
         return "\n\n".join(parts) if parts else ""
+
+    def _run_policy_cmd(self, command: str) -> str | None:
+        """정책 검증 명령을 argv로 분해해 안전하게 실행한다.
+
+        비어 있거나 파싱 실패, 비허용 명령이면 None을 반환해 해당 섹션을 생략한다.
+        """
+        text = command.strip()
+        if not text:
+            return None
+        try:
+            argv = shlex.split(text)
+        except ValueError as e:
+            logger.warning("검증 명령 파싱 실패 (%s): %s", command, e)
+            return None
+        if not argv:
+            return None
+        return self._run_cmd(*argv)
 
     def _collect_python_project_summary(self) -> str:
         files = self._detect_project_files()

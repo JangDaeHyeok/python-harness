@@ -134,6 +134,68 @@ class TestReviewClassification:
         comment = classify_review_comment(ReviewComment(body="   "))
         assert comment.decision == ReviewDecision.IGNORE
 
+    def test_word_boundary_prevents_debug_matching_bug(self) -> None:
+        """'debug'/'bugfix done' 같은 부분일치는 ACCEPT로 오분류되지 않는다."""
+        for body in ("Add a debug log here", "bugfix done, looks good"):
+            comment = classify_review_comment(ReviewComment(body=body))
+            assert comment.decision != ReviewDecision.ACCEPT, body
+
+    def test_coderabbit_potential_issue_marker_accepts(self) -> None:
+        comment = classify_review_comment(
+            ReviewComment(
+                body="⚠️ Potential issue\n인덱스 범위를 확인하세요",
+                path="a.py",
+                line=10,
+                author="coderabbitai",
+            )
+        )
+        assert comment.decision == ReviewDecision.ACCEPT
+
+    def test_coderabbit_nitpick_marker_defers(self) -> None:
+        comment = classify_review_comment(
+            ReviewComment(
+                body="🧹 Nitpick\n변수명을 다듬으면 좋겠습니다",
+                path="a.py",
+                line=10,
+                author="coderabbitai",
+            )
+        )
+        assert comment.decision == ReviewDecision.DEFER
+
+    def test_coderabbit_critical_marker_accepts(self) -> None:
+        comment = classify_review_comment(
+            ReviewComment(
+                body="_critical_ 인덱스 범위 오류가 있습니다",
+                path="a.py",
+                line=10,
+                author="coderabbitai",
+            )
+        )
+        assert comment.decision == ReviewDecision.ACCEPT
+
+    def test_coderabbit_not_critical_phrase_does_not_accept(self) -> None:
+        """'not critical'/'non-critical' 같은 부정 표현은 ACCEPT로 오분류되지 않는다."""
+        for body in (
+            "This is not critical, just a minor cleanup.",
+            "non-critical nitpick about naming.",
+        ):
+            comment = classify_review_comment(
+                ReviewComment(body=body, path="a.py", line=10, author="coderabbitai")
+            )
+            assert comment.decision != ReviewDecision.ACCEPT, body
+
+    def test_author_association_alone_does_not_accept(self) -> None:
+        comment = classify_review_comment(
+            ReviewComment(
+                body="이 로직을 한 번 봐주세요",
+                path="a.py",
+                line=10,
+                author="teammate",
+                author_association="MEMBER",
+            )
+        )
+        assert comment.decision != ReviewDecision.ACCEPT
+
     def test_filter_actionable_comments(self) -> None:
         comments = [
             ReviewComment(body="fix this", decision=ReviewDecision.ACCEPT),

@@ -29,6 +29,29 @@ class TestProjectPolicy:
         assert policy.pytest_timeout == 300
         assert policy.pytest_coverage is False
 
+    def test_package_dir_flat_and_src_layout(self) -> None:
+        flat = ProjectPolicy(package="billing")
+        assert flat.package_dir == "billing"
+
+        src = ProjectPolicy(package="billing", source_root="src")
+        assert src.package_dir == "src/billing"
+
+        normalized = ProjectPolicy(package="billing", source_root="/src/")
+        assert normalized.package_dir == "src/billing"
+
+    def test_source_root_roundtrips_through_yaml(self) -> None:
+        policy = ProjectPolicy(
+            project_name="svc", package="svc", source_root="src"
+        )
+        yaml_str = policy.to_yaml()
+        assert "source_root: src" in yaml_str
+
+        loaded = ProjectPolicy.from_dict(
+            {"project": {"package": "svc", "source_root": "src"}}
+        )
+        assert loaded.source_root == "src"
+        assert loaded.package_dir == "src/svc"
+
     def test_to_yaml_and_back(self) -> None:
         policy = ProjectPolicy(
             project_name="test-project",

@@ -40,13 +40,28 @@ def test_migrate_empty_directory_rejects_without_package_candidate(
         initializer.migrate_existing()
 
 
-def test_migrate_src_layout_rejects_with_clear_error(tmp_path: Path) -> None:
+def test_migrate_src_layout_records_source_root(tmp_path: Path) -> None:
     _write_src_package(tmp_path, "billing")
 
-    initializer = BootstrapInitializer(project_dir=tmp_path, offline=True)
+    initializer = BootstrapInitializer(
+        project_dir=tmp_path,
+        prompt="사내 청구 자동화",
+        offline=True,
+    )
+    result = initializer.migrate_existing()
 
-    with pytest.raises(ValueError, match=r"src/ 레이아웃은 .* 제외"):
-        initializer.migrate_existing()
+    assert "[MIGRATE] 패키지 자동 채택: src/billing" in result.messages
+
+    policy = yaml.safe_load(
+        (tmp_path / relative_path_for(TargetKind.POLICY)).read_text(encoding="utf-8")
+    )
+    assert policy["project"]["package"] == "billing"
+    assert policy["project"]["source_root"] == "src"
+
+    structure = yaml.safe_load((tmp_path / "harness_structure.yaml").read_text())
+    no_print = next(rule for rule in structure["rules"] if rule["name"] == "no_print_debug")
+    assert no_print["directories"] == ["src/billing"]
+    _assert_migration_gate_passes(tmp_path)
 
 
 def test_migrate_single_package_auto_adopts_and_creates_required_files(
@@ -167,6 +182,28 @@ def test_migrate_multiple_packages_uses_policy_package(tmp_path: Path) -> None:
     assert no_print["directories"] == ["payments"]
     assert no_print["severity"] == "error"
     _assert_migration_gate_passes(tmp_path)
+
+
+def test_migrate_prefers_explicit_policy_source_root_over_root(tmp_path: Path) -> None:
+    """루트·src에 같은 패키지가 있어도 정책의 source_root: src를 우선한다."""
+    _write_package(tmp_path, "billing")
+    _write_src_package(tmp_path, "billing")
+    policy_path = tmp_path / ".harness/project-policy.yaml"
+    policy_path.parent.mkdir(parents=True)
+    policy_path.write_text(
+        "project:\n  name: demo\n  package: billing\n  source_root: src\npolicies: {}\n",
+        encoding="utf-8",
+    )
+
+    initializer = BootstrapInitializer(project_dir=tmp_path, offline=True)
+    result = initializer.migrate_existing()
+
+    assert "[MIGRATE] 패키지 자동 채택: src/billing" in result.messages
+    policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    assert policy["project"]["source_root"] == "src"
+    structure = yaml.safe_load((tmp_path / "harness_structure.yaml").read_text())
+    no_print = next(rule for rule in structure["rules"] if rule["name"] == "no_print_debug")
+    assert no_print["directories"] == ["src/billing"]
 
 
 def test_migrate_normalizes_legacy_top_level_policy_package(tmp_path: Path) -> None:

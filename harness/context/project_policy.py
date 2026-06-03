@@ -36,6 +36,7 @@ class ProjectPolicy:
 
     project_name: str = ""
     package: str = "harness"
+    source_root: str = ""
     language: str = ""
     python_version: str = ""
     review_language: str = "ko"
@@ -61,6 +62,17 @@ class ProjectPolicy:
     pytest_timeout: int = 300
     pytest_coverage: bool = False
     custom_rules: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def package_dir(self) -> str:
+        """패키지 디렉터리의 프로젝트 루트 기준 상대 경로를 반환한다.
+
+        source_root가 비어 있으면 flat 레이아웃(루트 ``<package>/``),
+        값이 있으면 src 레이아웃(``<source_root>/<package>/``)을 의미한다.
+        """
+        root = self.source_root.strip().strip("/")
+        package = self.package.strip() or "harness"
+        return f"{root}/{package}" if root else package
 
     def to_yaml(self) -> str:
         """정책을 YAML 문자열로 변환한다."""
@@ -92,6 +104,8 @@ class ProjectPolicy:
                 },
             },
         }
+        if self.source_root:
+            data["project"]["source_root"] = self.source_root
         if self.python_version:
             data["project"]["python_version"] = self.python_version
         if self.custom_rules:
@@ -112,6 +126,7 @@ class ProjectPolicy:
         return cls(
             project_name=str(project.get("name", "")),
             package=str(project.get("package") or "harness"),
+            source_root=str(project.get("source_root", "")).strip().strip("/"),
             language=str(project.get("language", "")),
             python_version=str(project.get("python_version", "")),
             review_language=str(policies.get("review_language", "ko")),
