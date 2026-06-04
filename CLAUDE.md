@@ -49,6 +49,7 @@ harness/
 - 상세 PR 자동화 정책·CodeRabbit 처리 규칙은 `harness/review/CLAUDE.md` 참조.
 
 ## 자주 쓰는 명령 (요약)
+- 초보자용 별칭: `harness doctor` / `harness init "설명"` / `harness fix "수정 요청"` / `harness ship "수정 요청"` / `harness pr` / `harness review` — 각각 `harness-doctor`·`harness-init`·`harness --mode modify`·PR 자동화(modify→PR→리뷰 반영)·`auto-pr-pipeline`·`auto-pr-pipeline --current-pr`로 위임. `harness fix --headless`는 헤드리스 Phase + docs-diff 완화. `harness ship`은 수정→PR→리뷰 반영까지 자동화하되, 머지/리뷰 답글은 정책상 사용자 확인(`--pr-confirm-github-writes`)을 별도로 요구한다.
 - `harness "프롬프트"` — create 모드
 - `harness --mode modify "수정 요청"` — modify 모드
 - `harness --mode modify --use-headless-phases --auto-pr --pr-base main "수정 요청"` — End-to-End

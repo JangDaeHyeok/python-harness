@@ -73,7 +73,7 @@ def _resolve_client(offline: bool, api_endpoint: str | None) -> HarnessClient | 
         return None
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """harness-init 진입점."""
     parser = argparse.ArgumentParser(
         description="프로젝트 초기 환경(ADR, 컨벤션, 구조 규칙, 정책 파일)을 부트스트랩합니다.",
@@ -142,7 +142,7 @@ def main() -> None:
         help=f"API 엔드포인트 (미지정 시 {ENDPOINT_ENV_VAR} 환경변수 사용)",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     _setup_logging(args.verbose)
 

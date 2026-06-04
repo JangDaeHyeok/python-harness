@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from harness.bootstrap.doctor import run_doctor
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """harness-doctor 진입점."""
     parser = argparse.ArgumentParser(
         description="하네스 실행 전 GitHub/Python 준비 상태를 점검합니다.",
@@ -37,7 +37,7 @@ def main() -> None:
         default=None,
         help="API 엔드포인트 (미지정 시 HARNESS_API_ENDPOINT 환경변수 사용)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     project_dir = Path(args.project_dir).resolve()
     checks = run_doctor(project_dir, api_endpoint=args.api_endpoint)

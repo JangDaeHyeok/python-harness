@@ -714,7 +714,7 @@ def enforce_structure_gate(project_dir: Path) -> None:
     sys.exit(1)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="PR 자동화 파이프라인")
     parser.add_argument("--base", default="main", help="베이스 브랜치")
     parser.add_argument("--project-dir", default=".", help="프로젝트 디렉터리")
@@ -738,7 +738,7 @@ def main() -> None:
     parser.add_argument("--no-poll", action="store_true", help="리뷰 폴링 비활성화")
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.pr_number is not None and args.current_pr:
         parser.error("--pr-number와 --current-pr는 함께 사용할 수 없습니다.")
     setup_logging(args.verbose)

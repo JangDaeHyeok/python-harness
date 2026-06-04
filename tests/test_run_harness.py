@@ -498,3 +498,278 @@ def test_main_allows_resume_without_prompt(tmp_path: Path) -> None:
         run_harness.main()
 
     mock_orchestrator.run.assert_called_once_with("", resume_run_id="latest")
+
+
+def test_fix_subcommand_runs_modify_mode(tmp_path: Path) -> None:
+    """`harness fix`는 modify 모드로 위임하고 프롬프트를 그대로 전달한다."""
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "수정",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["harness", "fix", "--project-dir", str(project_dir), "로그인 에러 개선"],
+        ),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+
+        run_harness.main()
+
+    config = mock_orchestrator_cls.call_args.args[0]
+    assert config.mode == "modify"
+    assert config.use_headless_phases is False
+    mock_orchestrator.run.assert_called_once_with("로그인 에러 개선", resume_run_id="")
+
+
+def test_fix_headless_flag_enables_phases_and_relaxes_docs_diff() -> None:
+    """`harness fix --headless`는 헤드리스 Phase + docs-diff 완화로 매핑된다."""
+    argv = run_harness._build_fix_argv(["--headless", "리팩터링"])
+    assert "--use-headless-phases" in argv
+    assert "--allow-empty-docs-diff" in argv
+    assert argv[:2] == ["--mode", "modify"]
+    assert argv[-1] == "리팩터링"
+
+
+def test_ship_argv_enables_pr_automation_without_github_writes() -> None:
+    """`harness ship`은 구현→PR→리뷰 반영까지만 자동화한다.
+
+    머지/리뷰 답글 같은 GitHub 쓰기 명시 승인 플래그는 정책상 자동 주입하지 않는다.
+    """
+    argv = run_harness._build_ship_argv(["로그인 에러 개선"])
+    assert argv[:2] == ["--mode", "modify"]
+    for flag in (
+        "--use-headless-phases",
+        "--allow-empty-docs-diff",
+        "--auto-pr",
+    ):
+        assert flag in argv
+    assert "--pr-auto-merge" not in argv
+    assert "--pr-confirm-github-writes" not in argv
+    assert argv[-1] == "로그인 에러 개선"
+
+
+def test_ship_argv_forwards_explicit_merge_optin() -> None:
+    """머지까지 원하면 사용자가 명시 승인 플래그를 직접 덧붙일 수 있다."""
+    argv = run_harness._build_ship_argv(
+        ["--pr-auto-merge", "--pr-confirm-github-writes", "수정"]
+    )
+    assert "--pr-auto-merge" in argv
+    assert "--pr-confirm-github-writes" in argv
+
+
+def test_ship_argv_allows_pr_base_override() -> None:
+    """`harness ship --pr-base develop`은 기본 main을 뒤에서 덮어쓸 수 있다."""
+    argv = run_harness._build_ship_argv(["--pr-base", "develop", "수정"])
+    assert argv.count("--pr-base") == 2
+    assert argv[-3:] == ["--pr-base", "develop", "수정"]
+
+
+def test_ship_argv_drops_redundant_headless_flag() -> None:
+    """`harness ship`은 이미 헤드리스이므로 중복 `--headless`를 제거한다."""
+    argv = run_harness._build_ship_argv(["--headless", "수정"])
+    assert "--headless" not in argv
+    assert argv[-1] == "수정"
+
+
+def test_reserved_word_prompt_via_double_dash(tmp_path: Path) -> None:
+    """`harness -- fix`는 예약어를 서브커맨드가 아닌 create 프롬프트로 전달한다."""
+    project_dir = tmp_path / "project"
+    summary = {
+        "title": "생성",
+        "passed_sprints": 1,
+        "total_sprints": 1,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["harness", "--project-dir", str(project_dir), "--", "fix"],
+        ),
+        patch("scripts.run_harness.HarnessOrchestrator") as mock_orchestrator_cls,
+    ):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run.return_value = summary
+        mock_orchestrator_cls.return_value = mock_orchestrator
+
+        run_harness.main()
+
+    config = mock_orchestrator_cls.call_args.args[0]
+    assert config.mode == "create"
+    mock_orchestrator.run.assert_called_once_with("fix", resume_run_id="")
+
+
+def _capture_delegated_argv(target: str, argv: list[str]) -> list[str]:
+    """서브커맨드 위임 시 위임 대상 main()에 전달되는 argv를 캡처한다."""
+    captured: list[str] = []
+
+    def _record(passed_argv: list[str] | None = None) -> None:
+        captured.extend(passed_argv or [])
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch(target, side_effect=_record),
+    ):
+        run_harness.main()
+    return captured
+
+
+def test_doctor_subcommand_delegates() -> None:
+    """`harness doctor`는 harness-doctor 엔트리포인트로 위임한다."""
+    captured = _capture_delegated_argv(
+        "scripts.doctor.main", ["harness", "doctor", "--project-dir", "."]
+    )
+    assert captured == ["--project-dir", "."]
+
+
+def test_init_subcommand_delegates() -> None:
+    """`harness init`은 harness-init 엔트리포인트로 위임한다."""
+    captured = _capture_delegated_argv(
+        "scripts.init_harness.main", ["harness", "init", "결제 서비스"]
+    )
+    assert captured == ["결제 서비스"]
+
+
+def test_pr_subcommand_delegates_without_injection() -> None:
+    """`harness pr`은 auto-pr-pipeline에 인자를 그대로 위임한다."""
+    captured = _capture_delegated_argv(
+        "scripts.auto_pr_pipeline.main", ["harness", "pr", "--base", "develop"]
+    )
+    assert captured == ["--base", "develop"]
+
+
+def test_review_subcommand_injects_current_pr() -> None:
+    """`harness review`는 --current-pr 프리셋을 주입한다."""
+    captured = _capture_delegated_argv(
+        "scripts.auto_pr_pipeline.main", ["harness", "review"]
+    )
+    assert captured == ["--current-pr"]
+
+
+def test_review_subcommand_skips_injection_when_pr_number_given() -> None:
+    """`harness review --pr-number N`은 --current-pr를 주입하지 않는다."""
+    assert run_harness._build_review_argv(["--pr-number", "7"]) == ["--pr-number", "7"]
+
+
+def test_review_subcommand_skips_injection_when_pr_number_uses_equals() -> None:
+    """`harness review --pr-number=N`(argparse 표준형)도 주입을 건너뛴다."""
+    assert run_harness._build_review_argv(["--pr-number=7"]) == ["--pr-number=7"]
+
+
+def test_dispatch_subcommand_does_not_mutate_sys_argv() -> None:
+    """위임은 argv를 인자로 전달하므로 전역 sys.argv를 건드리지 않는다."""
+    sentinel = ["harness", "review"]
+    with (
+        patch.object(sys, "argv", list(sentinel)),
+        patch("scripts.auto_pr_pipeline.main") as mock_main,
+    ):
+        run_harness._dispatch_subcommand("review", [])
+        assert sys.argv == sentinel
+    mock_main.assert_called_once_with(["--current-pr"])
+
+
+def test_as_int_narrows_supported_types() -> None:
+    """passed/total 합산값을 안전하게 int로 좁히고, 비수치형은 0으로 폴백한다."""
+    assert run_harness._as_int(3) == 3
+    assert run_harness._as_int(2.0) == 2
+    assert run_harness._as_int(None) == 0
+    assert run_harness._as_int("nope") == 0
+
+
+def _summary(passed: int = 1, total: int = 1) -> dict[str, object]:
+    return {
+        "title": "테스트",
+        "passed_sprints": passed,
+        "total_sprints": total,
+        "total_cost_usd": 0.0,
+        "elapsed_human": "0분",
+    }
+
+
+def test_print_completion_pr_hint_uses_project_dir_when_not_cwd(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """project_dir가 cwd가 아니면 --project-dir를 포함한 정확한 명령을 안내한다."""
+    project_dir = tmp_path / "app"
+    with patch("scripts.run_harness._changed_files", return_value=[]):
+        run_harness._print_completion(
+            project_dir,
+            _summary(),
+            mode="modify",
+            auto_pr_enabled=False,
+            headless=False,
+            verbose=False,
+        )
+    out = capsys.readouterr().out
+    assert f"harness pr --project-dir {project_dir}" in out
+
+
+def test_print_completion_pr_hint_short_form_when_cwd(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """project_dir가 cwd면 짧은 'harness pr' 안내만 출력한다."""
+    with patch("scripts.run_harness._changed_files", return_value=[]):
+        run_harness._print_completion(
+            Path.cwd(),
+            _summary(),
+            mode="modify",
+            auto_pr_enabled=False,
+            headless=False,
+            verbose=False,
+        )
+    out = capsys.readouterr().out
+    assert "'harness pr' 로" in out
+    assert "--project-dir" not in out
+
+
+def test_print_completion_pr_hint_skipped_in_create_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """create 모드에서는 harness pr 안내를 출력하지 않는다."""
+    with patch("scripts.run_harness._changed_files", return_value=[]):
+        run_harness._print_completion(
+            tmp_path / "app",
+            _summary(),
+            mode="create",
+            auto_pr_enabled=False,
+            headless=False,
+            verbose=False,
+        )
+    out = capsys.readouterr().out
+    assert "harness pr" not in out
+
+
+def test_changed_files_returns_empty_on_git_failure(tmp_path: Path) -> None:
+    """git 실행이 실패하면 변경 파일 목록은 빈 리스트로 폴백한다."""
+    from harness.tools.shell import CommandResult
+
+    failure = CommandResult(
+        ["git", "status"], returncode=128, error_message="not a repo"
+    )
+    with patch("harness.tools.shell.run_argv_safe", return_value=failure):
+        assert run_harness._changed_files(tmp_path) == []
+
+
+def test_changed_files_parses_porcelain(tmp_path: Path) -> None:
+    """porcelain 출력(result.stdout)에서 파일 경로를 추출한다."""
+    from harness.tools.shell import CommandResult
+
+    result = CommandResult(
+        ["git", "status"],
+        returncode=0,
+        stdout=" M src/auth.py\n?? new_file.py\n",
+    )
+    with patch("harness.tools.shell.run_argv_safe", return_value=result):
+        assert run_harness._changed_files(tmp_path) == ["src/auth.py", "new_file.py"]

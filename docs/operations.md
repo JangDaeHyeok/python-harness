@@ -10,6 +10,24 @@ pip install -e ".[dev]"
 
 ## 2. 명령어 레퍼런스
 
+### 초보자용 서브커맨드 별칭
+
+`harness <서브커맨드>`는 기존 엔트리포인트를 그대로 감싼 별칭이다. 별칭 뒤에는 대응 명령의 모든 플래그를 그대로 붙일 수 있다.
+
+| 별칭 | 위임 대상 | 비고 |
+|------|-----------|------|
+| `harness doctor [옵션]` | `harness-doctor [옵션]` | 인자 그대로 전달 |
+| `harness init --offline "설명"` | `harness-init --offline "설명"` | 처음 셋업용. LLM 보강이 필요하면 `--offline`을 빼고 API 엔드포인트를 지정 |
+| `harness fix "요청" [옵션]` | `harness --mode modify "요청" [옵션]` | 비-headless modify 기본. docs-diff 게이트는 headless에서만 작동하므로 작은 수정이 막히지 않음 |
+| `harness fix --headless "요청"` | `harness --mode modify --use-headless-phases --allow-empty-docs-diff "요청"` | `--headless`가 헤드리스 Phase 실행 + docs-diff 게이트 완화로 매핑됨 |
+| `harness ship "요청" [옵션]` | `harness --mode modify --use-headless-phases --allow-empty-docs-diff --auto-pr --pr-base main "요청"` | 수정→PR→리뷰 반영까지 자동화. 머지/리뷰 답글은 정책상 자동 주입하지 않으며, 원하면 `--pr-auto-merge --pr-confirm-github-writes`를 직접 덧붙임. `--pr-base`는 뒤에 다시 지정해 덮어쓸 수 있음 |
+| `harness pr [옵션]` | `auto-pr-pipeline [옵션]` | 인자 그대로 전달 |
+| `harness review [옵션]` | `auto-pr-pipeline --current-pr [옵션]` | `--current-pr`/`--pr-number`를 직접 주면 주입을 건너뜀 |
+
+> 별칭은 기존 명령(`harness --mode modify ...`, `harness-init`, `harness-doctor`, `auto-pr-pipeline`, `create-pr-body`)을 깨지 않는다. 플래그를 동반한 기존 사용법은 그대로 유효하다.
+>
+> 단, `doctor`/`init`/`fix`/`ship`/`pr`/`review`는 첫 번째 인자로 오면 항상 서브커맨드로 해석되는 예약어다. 따라서 이 단어를 create 모드 프롬프트(`harness "프롬프트"`)로 단독 전달하면 서브커맨드로 가로채진다. 해당 단어를 프롬프트로 넘기려면 `harness -- "fix"`처럼 `--` 구분자로 옵션 해석을 끝내거나 `harness --mode create -- "fix"`를 사용한다.
+
 ### `harness` (= `python3 scripts/run_harness.py`)
 | 사용법 | 의미 |
 |--------|------|
@@ -26,6 +44,17 @@ pip install -e ".[dev]"
 | `harness --mode modify --use-headless-phases --auto-pr --pr-base main --pr-auto-merge --pr-confirm-github-writes "..."` | 답글과 머지까지 명시 승인 |
 | `harness --resume` | 현재 디렉터리 체크포인트 재개 |
 | `harness --run-id <run_id>` | 특정 체크포인트 재개 |
+
+#### 고급 전략 옵션
+초보자 첫 화면에는 노출하지 않는 실행 전략 플래그. 자세한 동작은 아래 3장 참조.
+
+| 옵션 | 기본값 | 의미 |
+|------|--------|------|
+| `--use-headless-phases` | 꺼짐 | 스프린트 구현을 Phase별 `claude --print` 독립 세션으로 실행 |
+| `--allow-empty-docs-diff` | 꺼짐(=docs-diff 필수) | 헤드리스 실행에서 docs-update 이후 docs-diff가 비어 있어도 계속 진행 |
+| `--headless-phase-timeout <초>` | 600 | 헤드리스 Phase당 타임아웃 |
+
+`harness fix --headless`는 위 `--use-headless-phases`와 `--allow-empty-docs-diff`를 함께 켜, 큰 작업은 Phase로 안정 실행하되 문서 변경이 없는 수정이 docs-diff 게이트에 막히지 않게 한다.
 
 ### `create-pr-body` (= `python3 scripts/create_pr_body.py`)
 | 사용법 | 의미 |

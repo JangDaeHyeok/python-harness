@@ -172,7 +172,7 @@ def _run_auto_pr(
     return result
 
 
-def main() -> None:
+def _run_harness(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="하네스 엔지니어링 프레임워크 실행")
     parser.add_argument("prompt", nargs="?", default="", help="프로젝트 설명 (1~4문장)")
     parser.add_argument(
@@ -285,7 +285,7 @@ def main() -> None:
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="상세 로그")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.pr_number is not None and args.pr_current_pr:
         parser.error("--pr-number와 --pr-current-pr는 함께 사용할 수 없습니다.")
     setup_logging(args.verbose)
@@ -327,13 +327,14 @@ def main() -> None:
 
     try:
         summary = orchestrator.run(args.prompt, resume_run_id=resume_run_id)
-        print("\n" + "=" * 60)
-        print("실행 완료!")
-        print(f"  프로젝트: {summary['title']}")
-        print(f"  스프린트: {summary['passed_sprints']}/{summary['total_sprints']} 통과")
-        print(f"  비용: ${summary['total_cost_usd']}")
-        print(f"  소요 시간: {summary['elapsed_human']}")
-        print("=" * 60)
+        _print_completion(
+            project_dir,
+            summary,
+            mode=mode,
+            auto_pr_enabled=args.auto_pr,
+            headless=args.use_headless_phases,
+            verbose=args.verbose,
+        )
 
         if args.auto_pr and summary.get("passed_sprints", 0) > 0:
             pr_result = _run_auto_pr(project_dir, args)
@@ -348,6 +349,166 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n사용자에 의해 중단됨")
         sys.exit(1)
+
+
+_SUBCOMMANDS = frozenset({"doctor", "init", "fix", "ship", "pr", "review"})
+
+
+def _build_fix_argv(rest: list[str]) -> list[str]:
+    """`harness fix` 인자를 기존 modify 플래그로 변환한다.
+
+    `--headless`는 헤드리스 Phase 실행 + docs-diff 게이트 완화로 매핑하고,
+    나머지 인자(positional prompt, --auto-pr 등)는 그대로 전달한다.
+    """
+    argv = ["--mode", "modify"]
+    for token in rest:
+        if token == "--headless":
+            argv.extend(["--use-headless-phases", "--allow-empty-docs-diff"])
+        else:
+            argv.append(token)
+    return argv
+
+
+def _build_ship_argv(rest: list[str]) -> list[str]:
+    """`harness ship` 인자를 구현→PR→리뷰 반영 자동화 플래그로 변환한다.
+
+    수정 → 헤드리스 Phase 구현 → push → PR 생성 → 리뷰 반영까지 한 번에 실행한다.
+    자동 머지와 리뷰 답글(gh api POST, gh pr merge)은 팀 공유 allow 밖 GitHub
+    쓰기 작업이라 프로젝트 정책상 사용자 확인 게이트에 남긴다. 머지까지 한 번에
+    돌리려면 `harness ship --pr-auto-merge --pr-confirm-github-writes "..."`처럼
+    명시 승인 플래그를 직접 덧붙여야 한다. `--pr-base` 등도 뒤에 다시 지정해
+    덮어쓸 수 있다.
+    """
+    argv = [
+        "--mode", "modify",
+        "--use-headless-phases",
+        "--allow-empty-docs-diff",
+        "--auto-pr",
+        "--pr-base", "main",
+    ]
+    for token in rest:
+        if token == "--headless":
+            continue
+        argv.append(token)
+    return argv
+
+
+def _build_review_argv(rest: list[str]) -> list[str]:
+    """`harness review`를 현재 PR 리뷰 재처리 프리셋으로 변환한다."""
+    has_pr_target = any(
+        token == "--current-pr"
+        or token == "--pr-number"
+        or token.startswith("--pr-number=")
+        for token in rest
+    )
+    if has_pr_target:
+        return list(rest)
+    return ["--current-pr", *rest]
+
+
+def _dispatch_subcommand(name: str, rest: list[str]) -> None:
+    """초보자용 별칭 서브커맨드를 기존 엔트리포인트로 위임한다."""
+    if name == "fix":
+        _run_harness(_build_fix_argv(rest))
+        return
+    if name == "ship":
+        _run_harness(_build_ship_argv(rest))
+        return
+    if name == "doctor":
+        from scripts import doctor
+
+        doctor.main(rest)
+        return
+    if name == "init":
+        from scripts import init_harness
+
+        init_harness.main(rest)
+        return
+    if name in ("pr", "review"):
+        from scripts import auto_pr_pipeline
+
+        pipeline_args = _build_review_argv(rest) if name == "review" else list(rest)
+        auto_pr_pipeline.main(pipeline_args)
+        return
+
+
+def _changed_files(project_dir: Path) -> list[str]:
+    """작업 트리에서 변경된 파일 경로를 반환한다 (실패 시 빈 목록)."""
+    from harness.tools.shell import run_argv_safe
+
+    result = run_argv_safe(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=str(project_dir),
+    )
+    if not result.ok:
+        return []
+    files: list[str] = []
+    for line in result.stdout.splitlines():
+        path = line[3:].strip() if len(line) > 3 else ""
+        if path:
+            files.append(path)
+    return files
+
+
+def _as_int(value: object) -> int:
+    """summary 값(object)을 안전하게 int로 좁힌다."""
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _print_completion(
+    project_dir: Path,
+    summary: dict[str, object],
+    *,
+    mode: str,
+    auto_pr_enabled: bool,
+    headless: bool,
+    verbose: bool,
+) -> None:
+    """변경/검증 결과와 다음 단계를 초보자 친화적으로 출력한다."""
+    passed = _as_int(summary.get("passed_sprints"))
+    total = _as_int(summary.get("total_sprints"))
+    all_passed = total > 0 and passed == total
+    changed = _changed_files(project_dir)
+
+    print("\n" + "=" * 60)
+    print(f"실행 완료: {summary.get('title', '')}")
+    print("-" * 60)
+
+    if changed:
+        shown = ", ".join(changed[:5])
+        suffix = f" 외 {len(changed) - 5}개" if len(changed) > 5 else ""
+        print(f"  변경된 파일: {len(changed)}개 ({shown}{suffix})")
+    else:
+        print("  변경된 파일: 없음")
+
+    if all_passed:
+        print(f"  검증: {passed}/{total} 스프린트 통과 — ruff·mypy·pytest·구조 통과")
+    else:
+        print(f"  검증: {passed}/{total} 스프린트 통과")
+    print(f"  비용: ${summary.get('total_cost_usd', 0)} / 소요 시간: {summary.get('elapsed_human', '-')}")
+
+    if changed:
+        print(f"  다음에 볼 파일: {changed[0]}")
+
+    if not auto_pr_enabled and passed > 0 and mode == "modify":
+        if project_dir == Path.cwd():
+            pr_cmd = "harness pr"
+        else:
+            pr_cmd = f"harness pr --project-dir {project_dir}"
+        print(f"  다음 명령: git diff 로 변경 확인 → '{pr_cmd}' 로 PR 생성·리뷰 반영")
+
+    if headless:
+        print(f"  (Phase 산출물: {project_dir / '.harness' / 'tasks'})")
+    if verbose:
+        print(f"  (상세 요약: {project_dir / '.harness' / 'artifacts' / 'summary.json'})")
+    print("=" * 60)
+
+
+def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] in _SUBCOMMANDS:
+        _dispatch_subcommand(sys.argv[1], sys.argv[2:])
+        return
+    _run_harness()
 
 
 if __name__ == "__main__":

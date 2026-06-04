@@ -34,7 +34,7 @@ def _generate_body(project_dir: Path, base: str, summary: str, branch: str | Non
     return body
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """PR 본문 생성 진입점."""
     parser = argparse.ArgumentParser(
         description="PR 본문(pr-body.md)을 생성합니다.",
@@ -63,7 +63,7 @@ def main() -> None:
         action="store_true",
         help="git worktree에서 격리 실행 (메인 작업 트리를 변경하지 않음)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     project_dir = Path(args.project_dir).resolve()
     if not project_dir.exists():
