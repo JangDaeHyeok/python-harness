@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from harness.tools.adr import ADRLoader
+from harness.tools.adr import ADRLoader, extract_key_sections
 from harness.tools.path_safety import sanitize_branch_name
 from harness.tools.shell import run_argv_safe
 
@@ -29,6 +29,8 @@ _STRUCTURE_PREVIEW_LIMIT = 2000
 _DEPENDENCY_FILE_LIMIT = 120_000
 _SOURCE_SCAN_LIMIT = 200
 _SOURCE_FILE_LIMIT = 200_000
+_RELEVANT_ADR_LIMIT = 4
+_ADR_BODY_PREVIEW_LIMIT = 1500
 
 _PROJECT_MARKERS = (
     "pyproject.toml",
@@ -66,6 +68,7 @@ class ModifyContext:
     design_intent: str = ""
     code_convention: str = ""
     adrs: list[dict[str, str]] = field(default_factory=list)
+    relevant_adrs: list[dict[str, str]] = field(default_factory=list)
     structure_rules: str = ""
     recent_test_summary: str = ""
     project_policy: str = ""
@@ -98,12 +101,28 @@ class ModifyContext:
             sections.append(f"## 코드 컨벤션\n\n```yaml\n{conv_preview}\n```\n")
 
         if self.adrs:
-            sections.append("## 아키텍처 결정 (ADR)\n")
+            sections.append("## 아키텍처 결정 (ADR) 목록\n")
             for adr in self.adrs:
                 source_tag = f" (외부: {adr['source']})" if adr.get("source") else ""
                 sections.append(f"### {adr.get('filename', '')}: {adr.get('title', '')}{source_tag}")
                 sections.append(f"상태: {adr.get('status', 'unknown')}\n")
             sections.append("")
+
+        if self.relevant_adrs:
+            sections.append("## 이 작업과 관련된 ADR 핵심 본문\n")
+            sections.append(
+                "_아래 ADR은 수정 요청과 관련도가 높아 핵심 섹션(배경/결정/이유/결과)을 함께 제공합니다. "
+                "수정 계획은 이 결정들을 준수해야 합니다._\n"
+            )
+            for adr in self.relevant_adrs:
+                source_tag = f" (외부: {adr['source']})" if adr.get("source") else ""
+                sections.append(f"### {adr.get('filename', '')}: {adr.get('title', '')}{source_tag}\n")
+                body = _truncate_with_notice(
+                    extract_key_sections(adr.get("content", "")),
+                    _ADR_BODY_PREVIEW_LIMIT,
+                )
+                sections.append(body)
+                sections.append("")
 
         if self.structure_rules:
             rules_preview = _truncate_with_notice(
@@ -129,11 +148,17 @@ class ModifyContextCollector:
     def __init__(self, project_dir: Path) -> None:
         self.project_dir = Path(project_dir)
 
-    def collect(self, policy: ProjectPolicy | None = None) -> ModifyContext:
+    def collect(
+        self,
+        policy: ProjectPolicy | None = None,
+        task_description: str = "",
+    ) -> ModifyContext:
         """프로젝트 컨텍스트를 수집한다.
 
         Args:
             policy: 프로젝트 정책. None이면 기본 경로를 사용한다.
+            task_description: 수정 요청 설명. 주어지면 관련 ADR 핵심 본문을 선별해
+                Planner 컨텍스트에 포함한다.
         """
         convention_path = (
             self.project_dir / policy.conventions_source
@@ -154,6 +179,7 @@ class ModifyContextCollector:
         adrs = self._load_adrs(adr_dir)
         if policy and policy.external_adr_sources:
             adrs.extend(ADRLoader.load_from_external_sources(policy.external_adr_sources))
+        relevant_adrs = self._select_relevant_adrs(adrs, task_description)
 
         ctx = ModifyContext(
             git_branch=self._get_git_branch(),
@@ -164,6 +190,7 @@ class ModifyContextCollector:
             ),
             code_convention=self._read_file_safe(convention_path),
             adrs=adrs,
+            relevant_adrs=relevant_adrs,
             structure_rules=self._read_file_safe(structure_path),
             recent_test_summary=self._get_recent_test_summary(policy),
             project_policy=self._read_file_safe(
@@ -172,12 +199,23 @@ class ModifyContextCollector:
             python_project_summary=self._collect_python_project_summary(),
         )
         logger.info(
-            "수정 컨텍스트 수집 완료: branch=%s, changed_files=%d, adrs=%d",
+            "수정 컨텍스트 수집 완료: branch=%s, changed_files=%d, adrs=%d, relevant_adrs=%d",
             ctx.git_branch,
             len(ctx.changed_files),
             len(ctx.adrs),
+            len(ctx.relevant_adrs),
         )
         return ctx
+
+    def _select_relevant_adrs(
+        self, adrs: list[dict[str, str]], task_description: str,
+    ) -> list[dict[str, str]]:
+        """수정 요청과 관련도가 높은 ADR을 선별한다 (본문 주입용)."""
+        if not task_description.strip() or not adrs:
+            return []
+        loader = ADRLoader(self.project_dir / "docs" / "adr")
+        relevant = loader.filter_relevant(task_description, adrs)
+        return relevant[:_RELEVANT_ADR_LIMIT]
 
     def _get_git_branch(self) -> str:
         return self._run_git("branch", "--show-current") or "unknown"

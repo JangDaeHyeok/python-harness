@@ -20,11 +20,15 @@ from harness.context.structure_gate import check_structure, format_structure_vio
 
 def _generate_body(project_dir: Path, base: str, summary: str, branch: str | None) -> str:
     """PR 본문을 생성하고 반환한다. worktree/직접 실행 모두에서 호출된다."""
+    from harness.context.project_policy import ProjectPolicyManager
     from harness.review.artifacts import ReviewArtifactManager
     from harness.review.pr_body import PRBodyGenerator
 
+    policy = ProjectPolicyManager(project_dir).load()
     artifact_manager = ReviewArtifactManager(project_dir, branch=branch)
-    generator = PRBodyGenerator(project_dir)
+    generator = PRBodyGenerator(
+        project_dir, external_adr_sources=policy.external_adr_sources,
+    )
     body = generator.generate(
         artifact_manager=artifact_manager,
         base_branch=base,

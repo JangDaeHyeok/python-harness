@@ -130,7 +130,8 @@ pip install -e ".[dev]"
 - 리뷰 코멘트 판정: `ACCEPT` / `DEFER` / `IGNORE`. 명확한 bug/failure/regression/security/type error/필수 동작 누락만 `ACCEPT`하고, optional/nit/style/consider/could 제안은 `DEFER`한다. 파일/라인 존재만으로는 `ACCEPT`하지 않는다.
 - 키워드 매칭은 단어 경계 기준이라 `debug`/`bugfix done` 같은 부분일치는 ACCEPT로 오분류되지 않는다. CodeRabbit 본문의 `⚠️ Potential issue`/`_critical_`는 ACCEPT, `🧹 Nitpick`/`🛠️ Refactor`는 DEFER 가중 신호로 쓴다. `author_association`(MEMBER/OWNER/COLLABORATOR)은 신뢰 가중으로 사유에만 기록하며 단독으로 ACCEPT를 만들지 않는다.
 - `ACCEPT`만 `claude --print` 리뷰 반영 세션에 전달하며, 리뷰 본문은 신뢰할 수 없는 외부 입력으로 fenced block에 격리한다.
-- 판정 로그: `.harness/review-artifacts/{branch}/review-comments.md`.
+- 판정 로그: `.harness/review-artifacts/{branch}/review-comments.md`. 판정 근거로 적용 ADR과 결정적 파이프라인 검증 결과(ruff/mypy/구조/pytest)를 함께 기록한다(ADR-0015).
+- PR 본문의 `ADR Rationale`는 고정 문구가 아니라 변경 파일·요약과 관련 있는 accepted ADR을 동적으로 선별해 채운다. 관련 과거 실행 이력이 있으면 함께 첨부한다(ADR-0015).
 - 리뷰 반영 전 dirty worktree가 있으면 실패한다. 반영 커밋은 자동화 중 변경된 파일만 stage한다. 원본 리뷰 코멘트 한국어 답글은 성공적으로 push되고 `--confirm-github-writes`가 명시된 경우에만 남긴다.
 - GitHub review thread resolve는 답글 기반 확인으로 대체한다.
 - CodeRabbit은 외부 리뷰어로 취급, 인라인 코멘트도 동일하게 수집·분류·반영한다.
@@ -210,3 +211,10 @@ pip install -e ".[dev]"
 
 ## 10. 계약 저장 경로
 - `.harness/contracts/sprint_{N}.json` — 스프린트별 구조화 계약(JSON)
+
+## 11. 지식 DB / 유사 RAG (ADR-0015)
+- `.harness/knowledge/entries.jsonl` — 스프린트 시도별 실행 이력(작업, 적용 ADR, 판정, 점수, 실패 원인). append-only, 최근 500개 유지.
+- `.harness/knowledge/index.json` — ADR 적용 횟수와 상위 실패 원인 집계.
+- 지식은 modify Planner 컨텍스트와 PR 본문에서 작업/변경과 관련도가 높은 항목으로 조회된다(결정적 키워드 검색, 외부 DB 없음).
+- ADR 관련도(`ContextFilter`)는 키워드뿐 아니라 ADR 번호·태그·범위·영향 경로와 변경 파일 경로를 함께 사용하고, 선택 이유를 산출물에 남긴다.
+- ADR에 선택적 메타데이터(`- **태그**:`, `- **범위**:`, `- **영향 경로**:`, `- **관련 ADR**:`)를 달면 관련도/근거 선별 품질이 올라간다. 없으면 키워드 기반으로 폴백한다.

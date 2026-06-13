@@ -203,8 +203,13 @@ def create_pr(
         title = f"feat: {branch}"
 
     if not body:
+        from harness.context.project_policy import ProjectPolicyManager
+
+        policy = ProjectPolicyManager(project_dir).load()
         artifact_mgr = ReviewArtifactManager(project_dir)
-        pr_gen = PRBodyGenerator(project_dir)
+        pr_gen = PRBodyGenerator(
+            project_dir, external_adr_sources=policy.external_adr_sources,
+        )
         body = pr_gen.generate(artifact_mgr, base_branch)
 
     args = [

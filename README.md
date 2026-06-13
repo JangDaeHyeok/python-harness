@@ -705,14 +705,14 @@ ADR(Architecture Decision Record)을 정해진 형식·번호 규칙·한국어 
 > 사용자: `센서가 LLM 호출 캐싱을 갖도록 바꾸려고 해. ADR로 기록해줘`
 
 Claude는 이때:
-1. `docs/adr/` 디렉터리를 확인해 다음 번호 결정 (현재 0001~0014 → `0015-...`)
-2. 스킬이 정의한 형식대로 `0015-inferential-sensor-caching.md` 생성
+1. `docs/adr/` 디렉터리를 확인해 다음 번호 결정 (현재 0001~0015 → `0016-...`)
+2. 스킬이 정의한 형식대로 `0016-inferential-sensor-caching.md` 생성
 3. 상태(Proposed/Accepted), 배경, 결정, 결과, 대안, 관련 ADR 섹션 채움
 
 **산출물 확인**
 
 ```bash
-ls docs/adr/                       # 0015-... 가 추가됨
+ls docs/adr/                       # 0016-... 가 추가됨
 ```
 
 **수동 강제 호출**
@@ -919,8 +919,8 @@ python-harness/
 │   │   └── inferential/        #   AI 코드 리뷰
 │   ├── pipeline/               #   통합 파이프라인 (+ CLAUDE.md)
 │   ├── review/                 #   리뷰 산출물, PR 본문, docs-diff, worktree, session-fork (+ CLAUDE.md)
-│   ├── guides/                 #   시스템 프롬프트, GuideRegistry, ContextFilter (+ CLAUDE.md)
-│   ├── context/                #   체크포인트, modify 컨텍스트, 정책, Phase 매니저 (+ CLAUDE.md)
+│   ├── guides/                 #   시스템 프롬프트, GuideRegistry, ContextFilter(메타데이터 RAG) (+ CLAUDE.md)
+│   ├── context/                #   체크포인트, modify 컨텍스트, 정책, Phase 매니저, 지식 스토어 (+ CLAUDE.md)
 │   ├── contracts/              #   SprintContract 모델, 저장소 (+ CLAUDE.md)
 │   ├── bootstrap/              #   harness-init 부트스트래퍼, 템플릿 (+ CLAUDE.md)
 │   └── tools/                  #   shell, path_safety, file_io, api_client, adr_loader (+ CLAUDE.md)
@@ -935,7 +935,7 @@ python-harness/
 │   └── pr_review.py            #   GitHub Actions PR AI 리뷰
 ├── tests/                      # pytest 테스트
 ├── docs/
-│   ├── adr/                    # ADR 0001~0014
+│   ├── adr/                    # ADR 0001~0015
 │   ├── code-convention.yaml
 │   └── operations.md           # CLI/운영 상세 가이드
 ├── .claude/                    # Claude Code 하네스 레이어
@@ -1062,6 +1062,7 @@ ruff check . && mypy harness && python3 scripts/check_structure.py && pytest
 | [0012](docs/adr/0012-deterministic-pipeline-evaluation-gate.md) | 결정적 파이프라인 평가 게이트 | 결정적 검사와 LLM 평가가 모두 pass일 때만 최종 pass |
 | [0013](docs/adr/0013-argv-command-boundary-and-phase-completion-gate.md) | argv 명령 경계와 Phase 완료 게이트 | 외부 명령을 argv 안전 경계로 실행하고 Phase handoff/범위 위반을 결정적으로 실패 처리 |
 | [0014](docs/adr/0014-src-layout-and-source-root.md) | src 레이아웃과 project.source_root | `src/<패키지>` 레이아웃을 허용하고 `project.source_root`로 패키지 위치를 단일화 |
+| [0015](docs/adr/0015-knowledge-db-and-metadata-rag.md) | 지식 DB 누적과 메타데이터 기반 유사 RAG | ADR 메타데이터 추출·경로 매칭으로 관련도를 높이고, 실행 이력을 `.harness/knowledge/`에 누적해 Planner/PR이 참조 |
 
 신규 ADR 작성 시 `.claude/skills/adr-author/SKILL.md`의 번호 규칙·본문 형식을 따른다.
 

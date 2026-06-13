@@ -18,11 +18,21 @@ from harness.guides.context_filter import (
 class TestExtractKeywords:
     def test_basic_extraction(self) -> None:
         keywords = _extract_keywords("리뷰 워크플로 설계 의도 문서 생성")
-        assert "리뷰" not in keywords  # 2자 이하
+        # 한글 2글자 핵심어는 포함된다 (과도한 누락 방지).
+        assert "리뷰" in keywords
         assert "워크플로" in keywords
-        assert "설계" not in keywords  # 2자 이하
-        assert "의도" not in keywords  # 2자 이하
-        assert "문서" not in keywords  # 2자 이하
+        assert "설계" in keywords
+        assert "의도" in keywords
+        assert "문서" in keywords
+
+    def test_extracts_adr_number_token(self) -> None:
+        keywords = _extract_keywords("ADR-0010 구조 게이트")
+        assert "adr-0010" in keywords
+        assert "구조" in keywords
+
+    def test_drops_single_char_korean_particles(self) -> None:
+        keywords = _extract_keywords("이 가 을 를")
+        assert keywords == []
 
     def test_english_keywords(self) -> None:
         keywords = _extract_keywords("implement phase execution and context isolation")
@@ -46,12 +56,17 @@ class TestExtractKeySections:
             "## Context\n\nSome context.\n\n"
             "## 결정\n\n결정 내용입니다.\n\n"
             "## 이유\n\n이유 설명.\n\n"
-            "## 결과\n\n결과 내용.\n"
+            "## 결과\n\n결과 내용.\n\n"
+            "## 대안\n\n대안 내용.\n"
         )
         result = _extract_key_sections(content)
+        # 배경/결정/이유/결과는 핵심 섹션으로 포함된다.
+        assert "Some context" in result
         assert "결정 내용" in result
         assert "이유 설명" in result
-        assert "결과 내용" not in result
+        assert "결과 내용" in result
+        # 핵심 섹션이 아닌 항목(대안)은 제외된다.
+        assert "대안 내용" not in result
 
     def test_fallback_to_trimmed_content(self) -> None:
         content = "짧은 내용만 있는 ADR."
@@ -163,3 +178,44 @@ class TestContextFilter:
         scored = ContextFilter._score_adrs(adrs, ["에이전트", "아키텍처"])
         assert scored[0][0]["filename"] == "b.md"
         assert scored[0][1] > scored[1][1]
+
+    def test_score_records_reason(self) -> None:
+        adrs = [
+            {"filename": "b.md", "title": "테스트", "content": "에이전트 설명",
+             "status": "accepted", "number": "0002", "tags": "agent"},
+        ]
+        scored = ContextFilter._score_adrs(adrs, ["에이전트"])
+        assert "키워드" in scored[0][2]
+
+    def test_number_mention_scores_higher(self) -> None:
+        adr = {
+            "filename": "0010.md", "title": "구조", "content": "구조 강제",
+            "status": "accepted", "number": "0010",
+        }
+        with_number, reason = ContextFilter._score_one_adr(adr, ["adr-0010"], [])
+        assert with_number > 0
+        assert "ADR 번호" in reason
+
+    def test_affected_path_match_scores(self) -> None:
+        adr = {
+            "filename": "0010.md", "title": "구조", "content": "본문",
+            "status": "accepted", "number": "0010",
+            "affected_paths": "harness/context/",
+        }
+        _, reason = ContextFilter._score_one_adr(
+            adr, ["구조"], ["harness/context/structure_gate.py"],
+        )
+        assert "영향 경로" in reason
+
+    def test_filter_with_affected_files(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0010-structure.md").write_text(
+            "# 구조 강제\n\n- **상태**: Accepted\n- **영향 경로**: harness/context/\n\n"
+            "## 결정\n\n고정 구조를 강제한다.\n",
+            encoding="utf-8",
+        )
+        cf = ContextFilter(tmp_path)
+        result = cf.filter("구조", affected_files=["harness/context/structure_gate.py"])
+        assert any("0010" in a.get("filename", "") for a in result.relevant_adrs)
+        assert result.selection_reasons

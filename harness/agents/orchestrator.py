@@ -21,6 +21,7 @@ from harness.context.checkpoint import (
     SessionState,
     SprintState,
 )
+from harness.context.knowledge import KnowledgeEntry, KnowledgeStore
 from harness.context.modify_context import ModifyContextCollector
 from harness.context.phase_manager import PhaseManager, PhaseStatus
 from harness.context.project_policy import ProjectPolicyManager
@@ -108,19 +109,24 @@ class HarnessOrchestrator:
         self.review_artifacts = ReviewArtifactManager(self.project_dir)
         self.contract_store = ContractStore(self.project_dir)
         self._intent_gen = IntentGenerator()
-        self._criteria_gen = CriteriaGenerator(self.project_dir)
+        self._policy_mgr = ProjectPolicyManager(self.project_dir)
+        policy = self._policy_mgr.load()
+        external_adr_sources = policy.external_adr_sources
+        self._criteria_gen = CriteriaGenerator(
+            self.project_dir, external_adr_sources=external_adr_sources,
+        )
         self._worktree_mgr = WorktreeManager(self.project_dir)
         self._checkpoint_store = CheckpointStore(self.project_dir)
         self._session: SessionState | None = None
         self._modify_ctx_collector = ModifyContextCollector(self.project_dir)
-        self._policy_mgr = ProjectPolicyManager(self.project_dir)
         self._phase_mgr = PhaseManager(self.project_dir)
         self._docs_diff_gen = DocsDiffGenerator(self.project_dir)
-        self._context_filter = ContextFilter(self.project_dir)
-        self._session_fork_mgr = SessionForkManager(self.project_dir)
-        self._pipeline = HarnessPipeline(
-            str(self.project_dir), policy=self._policy_mgr.load()
+        self._context_filter = ContextFilter(
+            self.project_dir, external_adr_sources=external_adr_sources,
         )
+        self._knowledge_store = KnowledgeStore(self.project_dir)
+        self._session_fork_mgr = SessionForkManager(self.project_dir)
+        self._pipeline = HarnessPipeline(str(self.project_dir), policy=policy)
 
     def run(
         self, user_prompt: str, *, resume_run_id: str = ""
@@ -234,13 +240,23 @@ class HarnessOrchestrator:
     def _plan_modify(self, user_prompt: str) -> ProductSpec:
         """modify 모드 전용 계획 수립. 기존 코드베이스 컨텍스트를 수집하여 Planner에 전달한다."""
         policy = self._policy_mgr.load()
-        modify_ctx = self._modify_ctx_collector.collect(policy=policy)
+        modify_ctx = self._modify_ctx_collector.collect(
+            policy=policy, task_description=user_prompt,
+        )
         context_md = modify_ctx.to_markdown()
+
+        knowledge_entries = self._knowledge_store.relevant(user_prompt, limit=3)
+        knowledge_md = (
+            KnowledgeStore.to_markdown(knowledge_entries, title="참고할 과거 실행 이력")
+            if knowledge_entries
+            else ""
+        )
 
         message = (
             f"다음 수정 요청을 분석하고 수정 계획을 수립해주세요:\n\n"
             f"## 수정 요청\n{user_prompt}\n\n"
             f"{context_md}\n\n"
+            f"{knowledge_md}\n\n"
             "위 프로젝트 컨텍스트를 참고하여 기존 코드베이스를 수정하는 계획을 세워주세요.\n"
             "새 프로젝트를 만들지 말고 기존 파일을 수정하거나 필요한 파일만 추가하세요.\n"
             "변경 범위는 최소화하고, 기존 아키텍처 규칙과 코드 컨벤션을 준수하세요."
@@ -306,8 +322,11 @@ class HarnessOrchestrator:
             self.review_artifacts.save(f"docs-diff-sprint{sprint_num}.md", docs_diff_md)
             logger.info("  [Sprint %d] docs-diff 생성 완료 (%d개 파일)", sprint_num, len(docs_diff.changed_files))
 
-        # 유사 RAG: 컨텍스트 필터링으로 관련 평가 기준만 추출
-        filtered_ctx = self._context_filter.filter(task_goal)
+        # 유사 RAG: 컨텍스트 필터링으로 관련 평가 기준만 추출.
+        # 변경 파일을 함께 넘겨 ADR 영향 경로(메타데이터) 기반 매칭도 반영한다(ADR-0015).
+        filtered_ctx = self._context_filter.filter(
+            task_goal, affected_files=self._collect_changed_files()
+        )
         filtered_criteria_md = filtered_ctx.to_markdown()
 
         # 평가 기준 문서 생성 (필터링된 컨텍스트 + 기존 기준 결합)
@@ -450,6 +469,15 @@ class HarnessOrchestrator:
             session.phase = Phase.EVAL_DONE.value
             self._checkpoint_store.save(session)
 
+            self._record_knowledge(
+                task_goal=task_goal,
+                sprint_num=sprint_num,
+                attempt=attempt,
+                eval_result=eval_result,
+                pipeline_report=pipeline_report,
+                filtered_ctx=filtered_ctx,
+            )
+
             if eval_result.passed:
                 logger.info("  [Sprint %d] 통과! (점수: %s)", sprint_num, eval_result.overall_score)
                 self.sprint_results.append(eval_result)
@@ -466,7 +494,7 @@ class HarnessOrchestrator:
                 "  [Sprint %d] 실패 (점수: %s). 피드백 전달 중...",
                 sprint_num, eval_result.overall_score,
             )
-            self._send_feedback(eval_result, attempt)
+            self._send_feedback(eval_result, attempt, filtered_ctx, pipeline_report)
 
         if eval_result is not None:
             self.sprint_results.append(eval_result)
@@ -539,6 +567,111 @@ class HarnessOrchestrator:
         )
         return report
 
+    def _record_knowledge(
+        self,
+        task_goal: str,
+        sprint_num: int,
+        attempt: int,
+        eval_result: EvaluationResult,
+        pipeline_report: PipelineReport,
+        filtered_ctx: Any,
+    ) -> None:
+        """이번 시도의 결정 근거·판정·실패 원인을 지식 스토어에 누적한다."""
+        applied_adrs = [
+            adr.get("filename", "")
+            for adr in getattr(filtered_ctx, "relevant_adrs", [])
+            if adr.get("filename")
+        ]
+        failure_causes = self._collect_failure_causes(eval_result, pipeline_report)
+        entry = KnowledgeEntry(
+            task=task_goal,
+            mode=self.config.mode,
+            run_id=self._require_session().run_id,
+            sprint_number=sprint_num,
+            attempt=attempt,
+            passed=eval_result.passed,
+            score=eval_result.overall_score,
+            applied_adrs=applied_adrs,
+            failure_causes=failure_causes,
+            verdict_summary=eval_result.summary,
+            changed_files=self._collect_changed_files(),
+        )
+        self._knowledge_store.record(entry)
+
+    def _collect_changed_files(self) -> list[str]:
+        """작업 트리에서 변경된 파일 경로를 수집한다 (실패 시 빈 목록)."""
+        from harness.tools.shell import run_argv_safe
+
+        result = run_argv_safe(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(self.project_dir),
+        )
+        if not result.ok:
+            return []
+        files: list[str] = []
+        for line in result.stdout.splitlines():
+            path = line[3:].strip() if len(line) > 3 else ""
+            if path:
+                files.append(path)
+        return files
+
+    @staticmethod
+    def _collect_failure_causes(
+        eval_result: EvaluationResult, pipeline_report: PipelineReport,
+    ) -> list[str]:
+        """결정적 파이프라인과 평가 결과에서 실패 원인을 추출한다."""
+        causes: list[str] = []
+        check_labels = {
+            "lint_passed": "ruff 린트",
+            "type_check_passed": "mypy 타입",
+            "structure_passed": "구조 게이트",
+            "tests_passed": "pytest",
+        }
+        for key, label in check_labels.items():
+            if pipeline_report.details.get(key) is False:
+                causes.append(f"{label} 실패")
+        for bug in eval_result.bugs_found:
+            severity = str(bug.get("severity", "minor"))
+            description = str(bug.get("description", ""))
+            if description:
+                causes.append(f"[{severity}] {description}")
+        return causes
+
+    @staticmethod
+    def _reflection_basis(
+        filtered_ctx: Any, pipeline_report: PipelineReport | None,
+    ) -> list[str]:
+        """리뷰 판정의 근거(적용 ADR/정책 검증 결과)를 마크다운 줄로 만든다."""
+        lines: list[str] = ["## 판정 근거\n"]
+        applied = [
+            f"{adr.get('filename', '')} ({adr.get('title', '')})"
+            for adr in getattr(filtered_ctx, "relevant_adrs", [])
+            if adr.get("filename")
+        ]
+        if applied:
+            lines.append("- **적용 ADR**:")
+            lines.extend(f"  - {a}" for a in applied)
+        else:
+            lines.append("- **적용 ADR**: 직접 관련 ADR 없음")
+        if pipeline_report is not None:
+            verdict = "통과" if pipeline_report.passed else "실패"
+            lines.append(f"- **결정적 파이프라인 검증**: {verdict}")
+            check_labels = {
+                "lint_passed": "ruff",
+                "type_check_passed": "mypy",
+                "structure_passed": "구조",
+                "tests_passed": "pytest",
+            }
+            statuses = [
+                f"{label}={'OK' if pipeline_report.details.get(key) else 'FAIL'}"
+                for key, label in check_labels.items()
+                if pipeline_report.details.get(key) is not None
+            ]
+            if statuses:
+                lines.append(f"  - {', '.join(statuses)}")
+        lines.append("")
+        return lines
+
     def _get_or_create_sprint_state(self, sprint_num: int) -> SprintState:
         session = self._require_session()
         for s in session.sprints:
@@ -574,7 +707,13 @@ class HarnessOrchestrator:
                 detailed_feedback="",
             ))
 
-    def _send_feedback(self, eval_result: EvaluationResult, attempt: int) -> None:
+    def _send_feedback(
+        self,
+        eval_result: EvaluationResult,
+        attempt: int,
+        filtered_ctx: Any = None,
+        pipeline_report: PipelineReport | None = None,
+    ) -> None:
         feedback_lines = [
             f"## Evaluator 피드백 (시도 {attempt})\n",
             f"**점수**: {eval_result.overall_score}/10",
@@ -582,10 +721,11 @@ class HarnessOrchestrator:
             "### 발견된 버그",
         ]
 
-        # 반영 판단 로그 기록
+        # 반영 판단 로그 기록 — 판정 근거(적용 ADR/검증 결과)를 함께 남긴다.
         reflection_lines = [
             f"# 리뷰 반영 판단 로그 (Sprint {eval_result.sprint_number}, 시도 {attempt})\n",
         ]
+        reflection_lines.extend(self._reflection_basis(filtered_ctx, pipeline_report))
         for i, bug in enumerate(eval_result.bugs_found, start=1):
             severity = str(bug.get("severity", "minor"))
             description = str(bug.get("description", ""))

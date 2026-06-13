@@ -53,6 +53,17 @@ class TestModifyContext:
         assert "0001.md" in md
         assert "Test ADR" in md
 
+    def test_to_markdown_includes_relevant_adr_bodies(self) -> None:
+        ctx = ModifyContext(relevant_adrs=[{
+            "filename": "0010.md",
+            "title": "구조 강제",
+            "status": "accepted",
+            "content": "# ADR-0010\n\n## 결정\n\n고정 구조를 강제한다.\n",
+        }])
+        md = ctx.to_markdown()
+        assert "관련된 ADR 핵심 본문" in md
+        assert "고정 구조를 강제한다" in md
+
     def test_to_markdown_includes_policy(self) -> None:
         ctx = ModifyContext(project_policy="project:\n  name: test")
         md = ctx.to_markdown()
@@ -183,6 +194,45 @@ class TestModifyContextCollector:
         titles = [a["title"] for a in ctx.adrs]
         assert "Internal ADR" in titles
         assert "External ADR" in titles
+
+    def test_collect_selects_relevant_adr_bodies(self, tmp_path: Path) -> None:
+        """task_description가 주어지면 관련 ADR 본문이 선별된다."""
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0010-structure.md").write_text(
+            "# ADR-0010: 구조 강제\n\n- **상태**: Accepted\n\n"
+            "## 결정\n\n고정 구조를 강제한다.\n",
+            encoding="utf-8",
+        )
+        (adr_dir / "0007-guide.md").write_text(
+            "# ADR-0007: 가이드\n\n- **상태**: Accepted\n\n"
+            "## 결정\n\n무관한 결정.\n",
+            encoding="utf-8",
+        )
+        collector = ModifyContextCollector(tmp_path)
+        with (
+            patch.object(collector, "_run_git", return_value="main"),
+            patch.object(collector, "_run_cmd", return_value=None),
+        ):
+            ctx = collector.collect(task_description="구조 강제 수정")
+
+        assert any("0010" in a["filename"] for a in ctx.relevant_adrs)
+        md = ctx.to_markdown()
+        assert "관련된 ADR 핵심 본문" in md
+
+    def test_collect_without_task_description_no_relevant_adrs(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0010.md").write_text(
+            "# ADR-0010\n\n- **상태**: Accepted\n", encoding="utf-8",
+        )
+        collector = ModifyContextCollector(tmp_path)
+        with (
+            patch.object(collector, "_run_git", return_value="main"),
+            patch.object(collector, "_run_cmd", return_value=None),
+        ):
+            ctx = collector.collect()
+        assert ctx.relevant_adrs == []
 
     def test_collect_with_missing_external_adr_source(self, tmp_path: Path) -> None:
         """외부 ADR 경로가 없으면 무시하고 내부 ADR만 로드한다."""

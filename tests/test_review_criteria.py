@@ -88,6 +88,105 @@ class TestADRLoader:
         loader = ADRLoader(tmp_path / "docs" / "nonexistent")
         assert loader.load_all() == []
 
+    def test_status_korean_header_format(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0010-k.md").write_text(
+            "# ADR-0010: 구조\n\n- **상태**: Accepted\n- **날짜**: 2026-05-20\n",
+            encoding="utf-8",
+        )
+        adrs = ADRLoader(adr_dir).load_all()
+        assert adrs[0]["status"] == "accepted"
+        assert adrs[0]["number"] == "0010"
+        assert adrs[0]["date"] == "2026-05-20"
+
+    def test_metadata_extraction_from_header_bullets(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0012-m.md").write_text(
+            "# ADR-0012: 결정\n\n- **상태**: Accepted\n"
+            "- **관련 ADR**: ADR-0002, ADR-0009\n"
+            "- **태그**: pipeline, gate\n"
+            "- **영향 경로**: harness/pipeline/, harness/agents/\n",
+            encoding="utf-8",
+        )
+        adr = ADRLoader(adr_dir).load_all()[0]
+        assert adr["related_adrs"] == "ADR-0002, ADR-0009"
+        assert adr["tags"] == "pipeline, gate"
+        assert adr["affected_paths"] == "harness/pipeline/, harness/agents/"
+
+    def test_metadata_extraction_from_frontmatter(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0001-f.md").write_text(
+            "---\nstatus: accepted\ntags: [security, shell]\n---\n\n# ADR-0001: 보안\n",
+            encoding="utf-8",
+        )
+        adr = ADRLoader(adr_dir).load_all()[0]
+        assert adr["status"] == "accepted"
+        assert adr["tags"] == "security, shell"
+
+    def test_metadata_extraction_from_frontmatter_block_list(
+        self, tmp_path: Path
+    ) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0001-b.md").write_text(
+            "---\n"
+            "status: accepted\n"
+            "tags:\n"
+            "  - security\n"
+            "  - shell\n"
+            "affected_paths:\n"
+            "  - harness/tools/\n"
+            "  - harness/review/\n"
+            "---\n\n# ADR-0001: 보안\n",
+            encoding="utf-8",
+        )
+        adr = ADRLoader(adr_dir).load_all()[0]
+        assert adr["status"] == "accepted"
+        assert adr["tags"] == "security, shell"
+        assert adr["affected_paths"] == "harness/tools/, harness/review/"
+
+    def test_filter_relevant_no_fallback_returns_empty(self, tmp_path: Path) -> None:
+        project = setup_project(tmp_path)
+        loader = ADRLoader(project / "docs" / "adr")
+        adrs = loader.load_all()
+        relevant = loader.filter_relevant(
+            "완전히무관한내용xyz", adrs, fallback_to_first=False
+        )
+        assert relevant == []
+
+    def test_external_adr_sources_in_criteria(self, tmp_path: Path) -> None:
+        ext_dir = tmp_path / "ext" / "adr"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "0050-ext.md").write_text(
+            "# ADR-0050: 외부 결정\n\n- **상태**: Accepted\n\n## 결정\n\n외부 규칙.\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "docs" / "adr").mkdir(parents=True)
+        gen = CriteriaGenerator(tmp_path, external_adr_sources=[str(ext_dir)])
+        criteria = gen.generate("외부 결정")
+        assert any("외부 결정" in c.description for c in criteria)
+
+    def test_external_adr_same_number_not_dropped(self, tmp_path: Path) -> None:
+        # 로컬 ADR-0001과 외부 ADR-0001이 번호 충돌로 누락되면 안 된다.
+        project = setup_project(tmp_path)
+        ext_dir = tmp_path / "ext" / "adr"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "0001-ext.md").write_text(
+            "# ADR-0001: 외부 에이전트 결정\n\n- **상태**: Accepted\n\n"
+            "## 결정\n\n외부 에이전트 규칙.\n",
+            encoding="utf-8",
+        )
+        gen = CriteriaGenerator(project, external_adr_sources=[str(ext_dir)])
+        criteria = gen.generate("에이전트")
+        descriptions = [c.description for c in criteria]
+        assert any("3-에이전트 아키텍처" in d for d in descriptions)
+        assert any("외부 에이전트 결정" in d for d in descriptions)
+        adr_ids = [c.id for c in criteria if c.source == "adr"]
+        assert len(adr_ids) == len(set(adr_ids))  # id 충돌 없음
+
     def test_filter_relevant_keyword_match(self, tmp_path: Path) -> None:
         project = setup_project(tmp_path)
         loader = ADRLoader(project / "docs" / "adr")

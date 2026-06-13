@@ -10,10 +10,15 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from harness.context.knowledge import KnowledgeStore
+from harness.tools.adr import ADRLoader, extract_key_sections
+
 if TYPE_CHECKING:
     from harness.review.artifacts import ReviewArtifactManager
 
 logger = logging.getLogger(__name__)
+
+_MAX_RATIONALE_ADRS = 4
 
 
 class DiffError(RuntimeError):
@@ -97,8 +102,15 @@ def get_changed_files(project_dir: Path, base_branch: str = "main") -> list[str]
 class PRBodyGenerator:
     """diff와 리뷰 산출물을 조합하여 PR 본문을 생성한다."""
 
-    def __init__(self, project_dir: Path) -> None:
+    def __init__(
+        self,
+        project_dir: Path,
+        external_adr_sources: list[str] | None = None,
+    ) -> None:
         self.project_dir = Path(project_dir)  # normalize
+        self._adr_loader = ADRLoader(self.project_dir / "docs" / "adr")
+        self._external_adr_sources = external_adr_sources or []
+        self._knowledge_store = KnowledgeStore(self.project_dir)
 
     def generate(
         self,
@@ -110,7 +122,7 @@ class PRBodyGenerator:
         diff_stat = get_git_diff_stat(self.project_dir, base_branch)
         changed_files = get_changed_files(self.project_dir, base_branch)
 
-        design_intent = artifact_manager.load("design-intent.md")
+        design_intent = artifact_manager.load("design-intent.md") or ""
         quality_guide = artifact_manager.load("code-quality-guide.md")
 
         lines: list[str] = ["# PR 본문\n"]
@@ -153,10 +165,19 @@ class PRBodyGenerator:
         lines.append("- [ ] 구조 분석 통과 (`python3 scripts/check_structure.py`)")
         lines.append("")
 
-        # ADR Rationale
+        # ADR Rationale — 변경 파일/요약과 관련 있는 ADR을 동적으로 선별한다.
         lines.append("## ADR Rationale\n")
-        lines.append("- ADR-0010: 외부 프로젝트의 고정 구조를 강제해 센서 실패를 명확한 환경 오류로 드러낸다.")
+        query = " ".join([summary, design_intent, *changed_files])
+        lines.extend(self._adr_rationale(query, changed_files))
         lines.append("")
+
+        # 관련 과거 실행 지식 (있을 때만)
+        knowledge_entries = self._knowledge_store.relevant(
+            query, limit=3, fallback_to_recent=False
+        )
+        if knowledge_entries:
+            lines.append(KnowledgeStore.to_markdown(knowledge_entries, title="관련 과거 실행 이력"))
+            lines.append("")
 
         # Related Artifacts
         lines.append("## Related Artifacts\n")
@@ -174,6 +195,90 @@ class PRBodyGenerator:
         lines.append("")
 
         return "\n".join(lines)
+
+    def _adr_rationale(self, query: str, changed_files: list[str]) -> list[str]:
+        """변경 내용과 관련 있는 accepted ADR의 근거를 한 줄씩 정리한다."""
+        all_adrs = self._adr_loader.load_all()
+        if self._external_adr_sources:
+            all_adrs.extend(
+                ADRLoader.load_from_external_sources(self._external_adr_sources)
+            )
+        accepted = [a for a in all_adrs if a.get("status") == "accepted"]
+        if not accepted:
+            return ["_관련 ADR을 찾지 못했습니다._"]
+
+        relevant = self._adr_loader.filter_relevant(
+            query, accepted, fallback_to_first=False
+        )
+        # filter_relevant는 affected_paths를 검색하지 않으므로, 변경 경로로만
+        # 관련 있는 ADR이 여기서 탈락한다. 경로 매칭 ADR을 합집합으로 보강한다.
+        relevant = self._merge_path_matches(relevant, accepted, changed_files)
+        relevant = self._prioritize_by_paths(relevant, changed_files)[:_MAX_RATIONALE_ADRS]
+        if not relevant:
+            return ["_변경과 직접 관련된 ADR이 없습니다._"]
+
+        lines: list[str] = []
+        for adr in relevant:
+            number = adr.get("number", "") or adr.get("filename", "")
+            label = f"ADR-{number}" if number and number.isdigit() else number
+            rationale = self._one_line_rationale(adr.get("content", ""))
+            lines.append(f"- **{label}** {adr.get('title', '')}: {rationale}")
+        return lines
+
+    @staticmethod
+    def _merge_path_matches(
+        relevant: list[dict[str, str]],
+        candidates: list[dict[str, str]],
+        changed_files: list[str],
+    ) -> list[dict[str, str]]:
+        """변경 경로로만 관련 있는 ADR을 기존 결과에 합집합으로 추가한다."""
+        if not changed_files:
+            return relevant
+        files = [f.lower() for f in changed_files]
+        # 파일명은 소스마다 로컬이므로 (소스, 파일명)으로 식별해야
+        # 로컬 ADR과 외부 ADR이 같은 번호/파일명을 가져도 충돌하지 않는다.
+        seen = {(a.get("source", ""), a.get("filename", "")) for a in relevant}
+        merged = list(relevant)
+        for adr in candidates:
+            key = (adr.get("source", ""), adr.get("filename", ""))
+            if key not in seen and PRBodyGenerator._path_score(adr, files) > 0:
+                merged.append(adr)
+                seen.add(key)
+        return merged
+
+    @staticmethod
+    def _prioritize_by_paths(
+        adrs: list[dict[str, str]], changed_files: list[str],
+    ) -> list[dict[str, str]]:
+        """변경 파일 경로와 ADR 영향 경로가 겹치는 항목을 앞으로 정렬한다."""
+        if not changed_files:
+            return adrs
+        files = [f.lower() for f in changed_files]
+        return sorted(
+            adrs, key=lambda adr: PRBodyGenerator._path_score(adr, files), reverse=True
+        )
+
+    @staticmethod
+    def _path_score(adr: dict[str, str], files: list[str]) -> int:
+        """ADR 영향 경로와 (소문자) 변경 파일 경로가 겹치는 개수를 센다."""
+        prefixes = [
+            p.strip().rstrip("/*").lower()
+            for p in adr.get("affected_paths", "").split(",")
+            if p.strip()
+        ]
+        return sum(
+            1 for p in prefixes if p and any(p in f or f.startswith(p) for f in files)
+        )
+
+    @staticmethod
+    def _one_line_rationale(content: str) -> str:
+        """ADR 본문에서 결정 핵심을 한 줄로 요약한다."""
+        sections = extract_key_sections(content)
+        for line in sections.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                return stripped[:200]
+        return "아키텍처 결정 근거 참조."
 
     @staticmethod
     def _extract_overview(design_intent_md: str) -> list[str]:

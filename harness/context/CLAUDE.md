@@ -2,8 +2,9 @@
 
 ## 책임
 - `checkpoint.py` — 실행별 체크포인트 (`.harness/checkpoints/{run_id}.json`), `latest.json` 포인터.
-- `modify_context.py` — modify 모드용 컨텍스트(브랜치, diff, ADR, 컨벤션, 구조, 정책).
+- `modify_context.py` — modify 모드용 컨텍스트(브랜치, diff, ADR 목록·관련 ADR 핵심 본문, 컨벤션, 구조, 정책). `task_description`을 주면 관련 ADR 본문을 선별 주입.
 - `project_policy.py` — `.harness/project-policy.yaml` 로더와 기본 정책. `source_root`/`package_dir`로 패키지 레이아웃을 단일 표현.
+- `knowledge.py` — `.harness/knowledge/` 실행 이력·적용 ADR·판정·실패 원인 누적 스토어(JSONL+인덱스, 결정적 검색). 기록 실패는 예외 전파 금지(ADR-0015).
 - `phase_manager.py` — 헤드리스 Phase 인덱스/상태 관리. `allowed_files`/검증 명령은 `package_dir`를 사용.
 
 ## 로컬 규칙

@@ -26,7 +26,7 @@ harness/
 ├── sensors/     # 연산적/추론적 센서 — harness/sensors/CLAUDE.md
 ├── pipeline/    # 통합 파이프라인 — harness/pipeline/CLAUDE.md
 ├── review/      # 리뷰 산출물·PR 자동화 — harness/review/CLAUDE.md
-├── context/     # 체크포인트·modify·정책·Phase — harness/context/CLAUDE.md
+├── context/     # 체크포인트·modify·정책·Phase·지식 스토어 — harness/context/CLAUDE.md
 ├── guides/      # 시스템 프롬프트·RAG 필터 — harness/guides/CLAUDE.md
 ├── contracts/   # 스프린트 계약 모델/저장소 — harness/contracts/CLAUDE.md
 ├── bootstrap/   # harness-init 부트스트랩 — harness/bootstrap/CLAUDE.md
@@ -34,7 +34,8 @@ harness/
 ```
 
 ## 문서 맵
-- `docs/adr/` — Architecture Decision Records (0001~0014). 신규 작성 시 `.claude/skills/adr-author/SKILL.md` 참조.
+- `docs/adr/` — Architecture Decision Records (0001~0015). 신규 작성 시 `.claude/skills/adr-author/SKILL.md` 참조. ADR에 `- **태그**:`/`- **영향 경로**:` 메타데이터를 달면 유사 RAG 관련도와 PR 근거 선별에 활용된다(선택, ADR-0015).
+- `.harness/knowledge/` — 실행 이력·적용 ADR·판정·실패 원인 누적 지식 스토어(`entries.jsonl`+`index.json`, ADR-0015). gitignore 대상.
 - `docs/code-convention.yaml` — 코드 컨벤션 (ConventionLoader).
 - `harness_structure.yaml` — 자동 검증되는 아키텍처 규칙.
 - `docs/operations.md` — CLI 사용법·운영 가이드 (명령어/플래그 전반).
@@ -65,4 +66,4 @@ harness/
 - `harness-doctor` → `scripts.doctor:main`
 
 ## ADR 목록
-0001 3-에이전트 / 0002 연산적 센서 우선 / 0003 ADR 기반 아키텍처 규칙 / 0004 리뷰 산출물 워크플로 / 0005 구조화 스프린트 계약 / 0006 체크포인트와 재개 / 0007 가이드 레지스트리 / 0008 수정 모드와 프로젝트 정책 / 0009 Phase 실행과 컨텍스트 격리 / 0010 외부 프로젝트 고정 구조 강제 / 0011 harness-init 마이그레이션 모드 / 0012 결정적 파이프라인 평가 게이트 / 0013 argv 명령 경계와 Phase 완료 게이트 / 0014 src 레이아웃과 project.source_root. 상세 내용은 `docs/adr/`.
+0001 3-에이전트 / 0002 연산적 센서 우선 / 0003 ADR 기반 아키텍처 규칙 / 0004 리뷰 산출물 워크플로 / 0005 구조화 스프린트 계약 / 0006 체크포인트와 재개 / 0007 가이드 레지스트리 / 0008 수정 모드와 프로젝트 정책 / 0009 Phase 실행과 컨텍스트 격리 / 0010 외부 프로젝트 고정 구조 강제 / 0011 harness-init 마이그레이션 모드 / 0012 결정적 파이프라인 평가 게이트 / 0013 argv 명령 경계와 Phase 완료 게이트 / 0014 src 레이아웃과 project.source_root / 0015 지식 DB 누적과 메타데이터 기반 유사 RAG. 상세 내용은 `docs/adr/`.

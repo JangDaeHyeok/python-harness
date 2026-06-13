@@ -123,14 +123,52 @@ class TestPRBodyGenerator:
         assert "## Test Plan" in result
         assert "pytest" in result
 
-    def test_generate_includes_adr_0010_rationale(self, tmp_path: Path) -> None:
+    def test_generate_rationale_fallback_without_adrs(self, tmp_path: Path) -> None:
         with patch("harness.review.pr_body.get_git_diff_stat", return_value=""), \
              patch("harness.review.pr_body.get_changed_files", return_value=[]):
             manager = self._make_manager(tmp_path)
             gen = PRBodyGenerator(tmp_path)
             result = gen.generate(manager)
         assert "## ADR Rationale" in result
+        assert "관련 ADR을 찾지 못했습니다" in result
+
+    def test_generate_includes_dynamic_adr_rationale(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0010-structure.md").write_text(
+            "# ADR-0010: 구조 강제\n\n- **상태**: Accepted\n"
+            "- **영향 경로**: harness/context/\n\n"
+            "## 결정\n\n외부 프로젝트의 고정 구조를 강제한다.\n",
+            encoding="utf-8",
+        )
+        with patch("harness.review.pr_body.get_git_diff_stat", return_value=""), \
+             patch(
+                 "harness.review.pr_body.get_changed_files",
+                 return_value=["harness/context/structure_gate.py"],
+             ):
+            manager = self._make_manager(tmp_path)
+            gen = PRBodyGenerator(tmp_path)
+            result = gen.generate(manager, summary="구조 게이트 강제")
+        assert "## ADR Rationale" in result
         assert "ADR-0010" in result
+        assert "고정 구조" in result
+
+    def test_generate_excludes_unrelated_adr_rationale(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        (adr_dir / "0010-structure.md").write_text(
+            "# ADR-0010: 구조 강제\n\n- **상태**: Accepted\n\n"
+            "## 결정\n\n외부 프로젝트의 고정 구조를 강제한다.\n",
+            encoding="utf-8",
+        )
+        with patch("harness.review.pr_body.get_git_diff_stat", return_value=""), \
+             patch("harness.review.pr_body.get_changed_files", return_value=[]):
+            manager = self._make_manager(tmp_path)
+            gen = PRBodyGenerator(tmp_path)
+            result = gen.generate(manager, summary="완전히무관한주제zzz")
+        assert "## ADR Rationale" in result
+        assert "ADR-0010" not in result
+        assert "변경과 직접 관련된 ADR이 없습니다" in result
 
     def test_generate_includes_related_artifacts(self, tmp_path: Path) -> None:
         with patch("harness.review.pr_body.get_git_diff_stat", return_value=""), \
@@ -177,3 +215,19 @@ class TestPRBodyGenerator:
         result = PRBodyGenerator._extract_overview(md)
         assert "인증 개선" in result
         assert "모듈 분리" in result
+
+    def test_merge_path_matches_keeps_same_filename_other_source(self) -> None:
+        # 같은 파일명이라도 소스가 다르면 외부 ADR이 누락되지 않아야 한다.
+        local = {
+            "filename": "0010-structure.md", "source": "",
+            "affected_paths": "harness/context/",
+        }
+        external = {
+            "filename": "0010-structure.md", "source": "/ext/adr",
+            "affected_paths": "harness/context/",
+        }
+        merged = PRBodyGenerator._merge_path_matches(
+            [local], [local, external], ["harness/context/foo.py"]
+        )
+        assert external in merged
+        assert len(merged) == 2
