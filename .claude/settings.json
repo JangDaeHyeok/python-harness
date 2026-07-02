@@ -67,5 +67,10 @@
         ]
       }
     ]
+  },
+  "env" : {
+    "CLAUDE_CODE_ENABLE_TELEMETRY" : "0",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA" : "0",
+    "OTEL_LOG_USER_PROMPTS" : "0"
   }
 }
