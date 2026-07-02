@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from harness.agents.base_agent import AgentConfig, BaseAgent
 from harness.guides import GuideRegistry
 from harness.guides.prompts import PLANNER_SYSTEM_PROMPT
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["PLANNER_SYSTEM_PROMPT", "PlannerAgent", "ProductSpec"]
 
@@ -36,14 +39,26 @@ class ProductSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProductSpec:
         return cls(
-            title=data["title"],
-            description=data["description"],
-            features=data["features"],
-            design_language=data["design_language"],
-            tech_stack=data["tech_stack"],
-            sprints=data["sprints"],
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            features=data.get("features", []),
+            design_language=data.get("design_language", {}),
+            tech_stack=data.get("tech_stack", {}),
+            sprints=data.get("sprints", []),
             ai_features=data.get("ai_features", []),
             success_criteria=data.get("success_criteria", []),
+        )
+
+    @classmethod
+    def empty(cls, reason: str) -> ProductSpec:
+        """파싱 실패 시 반환하는 안전 기본 스펙(스프린트 없음)."""
+        return cls(
+            title="파싱 실패",
+            description=reason,
+            features=[],
+            design_language={},
+            tech_stack={},
+            sprints=[],
         )
 
 
@@ -72,7 +87,12 @@ class PlannerAgent(BaseAgent):
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Planner 응답 파싱 실패: {e}\n응답: {response[:500]}") from e
+            logger.warning("Planner 응답 파싱 실패, 빈 스펙으로 폴백: %s", e)
+            return ProductSpec.empty(f"응답 파싱 실패: {e}")
+
+        if not isinstance(data, dict):
+            logger.warning("Planner 응답이 객체가 아님(%s), 빈 스펙으로 폴백", type(data).__name__)
+            return ProductSpec.empty("응답이 JSON 객체가 아님")
 
         return ProductSpec.from_dict(data)
 

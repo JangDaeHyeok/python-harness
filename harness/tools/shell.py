@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+# HTTP 요청에 허용되는 스킴. file://, gopher:// 등 비-HTTP 스킴을 차단한다.
+ALLOWED_URL_SCHEMES = {"http", "https"}
 
 DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/(?!tmp)"),
@@ -249,11 +254,54 @@ def validate_argv(argv: Sequence[str]) -> tuple[bool, str]:
     return _validate_allowed_argv(argv)
 
 
+def resolve_safe_path(path: str, project_dir: Path) -> tuple[Path | None, str]:
+    """경로를 정규화해 프로젝트 디렉터리 봉쇄를 검증하고 안전한 절대 경로를 반환한다.
+
+    심볼릭 링크를 따라간 뒤 프로젝트 밖을 가리키면 차단한다. 검증에 사용한
+    정규화 경로를 그대로 반환하므로, 호출부는 이 경로로 파일을 읽고 써야
+    검증 시점과 사용 시점의 불일치(TOCTOU)를 피할 수 있다.
+    """
+    project_root = project_dir.resolve()
+    full_path = (project_dir / path).resolve()
+    if not full_path.is_relative_to(project_root):
+        return None, f"프로젝트 디렉터리 밖의 경로에 접근할 수 없습니다: {path}"
+    return full_path, ""
+
+
 def validate_path(path: str, project_dir: Path) -> tuple[bool, str]:
     """경로가 프로젝트 디렉터리 안에 있는지 검증한다."""
-    full_path = (project_dir / path).resolve()
-    if not full_path.is_relative_to(project_dir.resolve()):
-        return False, f"프로젝트 디렉터리 밖의 경로에 접근할 수 없습니다: {path}"
+    resolved, reason = resolve_safe_path(path, project_dir)
+    return resolved is not None, reason
+
+
+def validate_http_url(url: str) -> tuple[bool, str]:
+    """HTTP 요청 대상 URL의 안전성을 검증한다. (안전 여부, 사유)를 반환.
+
+    스킴을 http/https로 제한하고(file:// 등 차단), 클라우드 메타데이터 등
+    link-local(169.254.0.0/16, fe80::/10) 대역 접근을 차단한다. 로컬/사설
+    대역은 하네스가 로컬 앱을 평가하는 정상 용례이므로 허용한다.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError as e:
+        return False, f"URL 파싱 실패: {e}"
+
+    scheme = parts.scheme.lower()
+    if scheme not in ALLOWED_URL_SCHEMES:
+        return False, f"허용되지 않은 URL 스킴입니다: {scheme or '(없음)'}"
+
+    host = parts.hostname
+    if not host:
+        return False, "URL에 호스트가 없습니다."
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # IP 리터럴이 아닌 호스트명은 통과시킨다(로컬 개발 대상 허용).
+        return True, ""
+
+    if ip.is_link_local:
+        return False, f"link-local 주소에는 접근할 수 없습니다: {host}"
     return True, ""
 
 
@@ -354,3 +402,61 @@ def run_command_safe(
         return f"Error: {e}"
     result = run_argv_safe(argv, cwd, timeout=timeout)
     return result.combined_output(limit=3000)
+
+
+def run_git_commit_safe(
+    project_dir: str | Path, message: str, timeout: int = 120
+) -> CommandResult:
+    """작업 트리 전체를 스테이징한 뒤 커밋한다.
+
+    `git add`/`git commit`은 mutating 작업이라 일반 allowlist(`validate_argv`)에서
+    의도적으로 차단된다. 하네스가 스프린트 결과를 커밋해야 하는 정상 용례를 위해
+    tools 계층에서만 노출하는 전용 래퍼로, 타임아웃을 강제하고 subprocess 사용을
+    이 한 곳으로 집중시킨다.
+    """
+    cwd_path = Path(project_dir)
+    if not cwd_path.exists() or not cwd_path.is_dir():
+        return CommandResult(
+            ["git", "commit"],
+            126,
+            error_message=f"작업 디렉터리가 존재하지 않습니다: {cwd_path}",
+        )
+    if "\x00" in message:
+        return CommandResult(
+            ["git", "commit"], 126, error_message="커밋 메시지에 NUL 문자가 포함되어 있습니다."
+        )
+
+    try:
+        add = subprocess.run(
+            ["git", "add", "-A"],
+            cwd=str(cwd_path),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if add.returncode != 0:
+            return CommandResult(
+                ["git", "add", "-A"], add.returncode, add.stdout, add.stderr
+            )
+        commit = subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=str(cwd_path),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return CommandResult(
+            ["git", "commit", "-m", message],
+            commit.returncode,
+            commit.stdout,
+            commit.stderr,
+        )
+    except subprocess.TimeoutExpired:
+        return CommandResult(
+            ["git", "commit"],
+            124,
+            timed_out=True,
+            error_message=f"git 커밋 타임아웃 ({timeout}초)",
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        return CommandResult(["git", "commit"], 126, error_message=str(e))

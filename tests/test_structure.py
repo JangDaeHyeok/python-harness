@@ -20,6 +20,27 @@ class TestStructureAnalyzer:
         )
         return StructureAnalyzer(str(tmp_path))
 
+    def test_init_has_no_side_effects(self, tmp_path: Path) -> None:
+        """__init__은 파일 IO를 하지 않고 로드를 지연한다."""
+        config = {"rules": [{"name": "req", "type": "required_files", "files": ["X"]}]}
+        (tmp_path / "harness_structure.yaml").write_text(yaml.dump(config))
+
+        analyzer = StructureAnalyzer(str(tmp_path))
+        # 생성 직후에는 아직 로드하지 않은 상태여야 한다.
+        assert analyzer._rules is None
+        assert analyzer._adrs is None
+
+        # 첫 접근 시 지연 로드된다.
+        assert len(analyzer.rules) == 1
+        assert analyzer._rules is not None
+
+    def test_missing_config_yields_empty_rules(self, tmp_path: Path) -> None:
+        """설정 파일이 없어도 생성/접근이 예외 없이 동작한다."""
+        analyzer = StructureAnalyzer(str(tmp_path))
+
+        assert analyzer.rules == []
+        assert analyzer.adrs == []
+
     def test_required_files_pass(self, tmp_path: Path) -> None:
         (tmp_path / "README.md").write_text("# Hello")
         analyzer = self._setup_project(tmp_path, [

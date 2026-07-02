@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,13 @@ from harness.agents.base_agent import AgentConfig, BaseAgent
 from harness.guides import GuideRegistry
 from harness.guides.prompts import GENERATOR_SYSTEM_PROMPT
 from harness.tools.api_client import DEFAULT_MODEL
-from harness.tools.shell import run_command_safe, validate_path
+from harness.tools.file_io import atomic_write_text
+from harness.tools.shell import (
+    resolve_safe_path,
+    run_command_safe,
+    run_git_commit_safe,
+    validate_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,19 +124,17 @@ class GeneratorAgent(BaseAgent):
         return f"Error: Unknown tool '{tool_name}'"
 
     def _write_file(self, path: str, content: str) -> str:
-        is_safe, reason = validate_path(path, self.project_dir)
-        if not is_safe:
+        full_path, reason = resolve_safe_path(path, self.project_dir)
+        if full_path is None:
             return f"Error: {reason}"
-        full_path = self.project_dir / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content, encoding="utf-8")
+        atomic_write_text(full_path, content)
         return f"파일 작성 완료: {path} ({len(content)} bytes)"
 
     def _read_file(self, path: str) -> str:
-        is_safe, reason = validate_path(path, self.project_dir)
-        if not is_safe:
+        full_path, reason = resolve_safe_path(path, self.project_dir)
+        if full_path is None:
             return f"Error: {reason}"
-        full_path = self.project_dir / path
         if not full_path.exists():
             return f"Error: 파일을 찾을 수 없음 - {path}"
         content = full_path.read_text(encoding="utf-8")
@@ -150,19 +153,10 @@ class GeneratorAgent(BaseAgent):
         return run_command_safe(command, work_dir)
 
     def _git_commit(self, message: str) -> str:
-        try:
-            subprocess.run(
-                ["git", "add", "."], cwd=str(self.project_dir), check=True
-            )
-            result = subprocess.run(
-                ["git", "commit", "-m", message],
-                cwd=str(self.project_dir),
-                capture_output=True,
-                text=True,
-            )
-            return result.stdout or result.stderr
-        except Exception as e:
-            return f"Git 커밋 실패: {e}"
+        result = run_git_commit_safe(self.project_dir, message)
+        if not result.ok:
+            return f"Git 커밋 실패: {result.combined_output(limit=3000)}"
+        return result.stdout or result.stderr
 
     def _list_files(self, path: str, recursive: bool) -> str:
         is_safe, reason = validate_path(path, self.project_dir)

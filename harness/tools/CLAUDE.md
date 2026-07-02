@@ -1,7 +1,7 @@
 # harness/tools — 유틸리티 로컬 규칙
 
 ## 책임
-- `shell.py` — 셸 명령 안전 래퍼(`run_command_safe`, `validate_command`)와 경로 봉쇄 검증(`validate_path`).
+- `shell.py` — 셸 명령 안전 래퍼(`run_command_safe`, `validate_command`), 경로 봉쇄 검증(`validate_path`/정규화 경로를 반환하는 `resolve_safe_path`), HTTP 요청 URL 검증(`validate_http_url`: 스킴 allowlist·link-local 차단), git 커밋 전용 안전 래퍼(`run_git_commit_safe`: 타임아웃 강제, mutating git을 이 한 곳으로 집중). (ADR-0016)
 - `path_safety.py` — 식별자 정규화/검증(`sanitize_branch_name`, `validate_run_id`).
 - `file_io.py` — 원자적 파일 쓰기(`atomic_write_text`).
 - `api_client.py` — LLM 엔드포인트 호출(`HarnessClient`).
@@ -16,4 +16,4 @@
 - LLM 응답 파싱 실패 시 안전 기본값 반환 (예외 전파 금지).
 
 ## 관련 ADR
-- 0001~0013 전반에 걸쳐 인프라 계층으로 인용된다.
+- 0001~0013 전반에 걸쳐 인프라 계층으로 인용된다. 0016 보안·견고성 하드닝(SSRF/경로/커밋 래퍼).

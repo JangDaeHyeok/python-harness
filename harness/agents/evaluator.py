@@ -12,7 +12,7 @@ from harness.agents.base_agent import AgentConfig, BaseAgent
 from harness.guides import GuideRegistry
 from harness.guides.prompts import EVALUATOR_SYSTEM_PROMPT
 from harness.tools.api_client import DEFAULT_MODEL
-from harness.tools.shell import run_command_safe, validate_path
+from harness.tools.shell import resolve_safe_path, run_command_safe, validate_http_url
 
 if TYPE_CHECKING:
     from harness.pipeline.harness_pipeline import PipelineReport
@@ -137,14 +137,15 @@ class EvaluatorAgent(BaseAgent):
 
         criteria_scores = [
             EvaluationCriteria(
-                name=c["name"],
+                name=c.get("name", ""),
                 description="",
                 weight=0.25,
                 threshold=6.0,
-                score=c["score"],
-                feedback=c["feedback"],
+                score=c.get("score", 0.0),
+                feedback=c.get("feedback", ""),
             )
             for c in data.get("criteria", [])
+            if isinstance(c, dict)
         ]
 
         return EvaluationResult(
@@ -174,10 +175,9 @@ class EvaluatorAgent(BaseAgent):
         return run_command_safe(command, str(self.project_dir))
 
     def _read_file(self, path: str) -> str:
-        is_safe, reason = validate_path(path, self.project_dir)
-        if not is_safe:
+        full_path, reason = resolve_safe_path(path, self.project_dir)
+        if full_path is None:
             return f"Error: {reason}"
-        full_path = self.project_dir / path
         if not full_path.exists():
             return f"Error: 파일을 찾을 수 없음 - {path}"
         return full_path.read_text(encoding="utf-8")[:10000]
@@ -185,6 +185,10 @@ class EvaluatorAgent(BaseAgent):
     def _check_url(self, url: str, method: str = "GET", body: str | None = None) -> str:
         import urllib.error
         import urllib.request
+
+        is_safe, reason = validate_http_url(url)
+        if not is_safe:
+            return f"Error: {reason}"
 
         try:
             data = body.encode() if body else None

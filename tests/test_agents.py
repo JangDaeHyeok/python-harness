@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from harness.agents.base_agent import AgentConfig, AgentMessage, BaseAgent
+from harness.agents.evaluator import EvaluatorAgent
 from harness.agents.generator import GeneratorAgent
 from harness.agents.planner import PlannerAgent, ProductSpec
 from harness.tools.api_client import APIResponse, TextBlock, ToolUseBlock, Usage
@@ -88,6 +89,33 @@ class TestProductSpec:
         spec_json = '```json\n{"title":"T","description":"D","features":[],"design_language":{},"tech_stack":{},"sprints":[]}\n```'
         result = planner.process_response(spec_json)
         assert result.title == "T"
+
+    def test_planner_process_response_invalid_json_falls_back(self) -> None:
+        """파싱 실패 시 예외 대신 안전 기본 스펙(스프린트 없음)을 반환한다."""
+        planner = PlannerAgent()
+
+        result = planner.process_response("not json at all {{{")
+
+        assert isinstance(result, ProductSpec)
+        assert result.title == "파싱 실패"
+        assert result.sprints == []
+
+    def test_planner_process_response_non_object_falls_back(self) -> None:
+        """JSON이지만 객체가 아니면 안전 기본 스펙을 반환한다."""
+        planner = PlannerAgent()
+
+        result = planner.process_response("[1, 2, 3]")
+
+        assert isinstance(result, ProductSpec)
+        assert result.sprints == []
+
+    def test_from_dict_tolerates_missing_keys(self) -> None:
+        """필수 키가 없어도 KeyError 없이 기본값으로 채운다."""
+        spec = ProductSpec.from_dict({"title": "only-title"})
+
+        assert spec.title == "only-title"
+        assert spec.features == []
+        assert spec.sprints == []
 
 
 class _DummyAgent(BaseAgent):
@@ -185,3 +213,76 @@ class TestGeneratorToolPathSafety:
 
         assert result.startswith("Error:")
         assert "프로젝트 디렉터리 밖" in result
+
+    def test_write_file_writes_within_project(self, tmp_path: Path) -> None:
+        generator = GeneratorAgent(str(tmp_path))
+
+        result = generator._write_file("out/hello.txt", "world")
+
+        assert "파일 작성 완료" in result
+        assert (tmp_path / "out" / "hello.txt").read_text(encoding="utf-8") == "world"
+
+    def test_write_file_rejects_traversal(self, tmp_path: Path) -> None:
+        generator = GeneratorAgent(str(tmp_path))
+
+        result = generator._write_file("../escape.txt", "x")
+
+        assert result.startswith("Error:")
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_write_file_rejects_symlink_escape(self, tmp_path: Path) -> None:
+        outside = tmp_path.parent / "gen_outside"
+        outside.mkdir(exist_ok=True)
+        (tmp_path / "link").symlink_to(outside)
+        generator = GeneratorAgent(str(tmp_path))
+
+        result = generator._write_file("link/pwn.txt", "x")
+
+        assert result.startswith("Error:")
+        assert not (outside / "pwn.txt").exists()
+
+
+class TestEvaluatorUrlSafety:
+    def test_check_url_blocks_file_scheme(self, tmp_path: Path) -> None:
+        evaluator = EvaluatorAgent(str(tmp_path))
+
+        result = evaluator._check_url("file:///etc/passwd")
+
+        assert result.startswith("Error:")
+        assert "스킴" in result
+
+    def test_check_url_blocks_link_local_metadata(self, tmp_path: Path) -> None:
+        evaluator = EvaluatorAgent(str(tmp_path))
+
+        result = evaluator._check_url("http://169.254.169.254/latest/meta-data/")
+
+        assert result.startswith("Error:")
+        assert "link-local" in result
+
+    def test_read_file_rejects_symlink_escape(self, tmp_path: Path) -> None:
+        outside = tmp_path.parent / "eval_outside"
+        outside.mkdir(exist_ok=True)
+        (outside / "secret.txt").write_text("top-secret", encoding="utf-8")
+        (tmp_path / "link").symlink_to(outside)
+        evaluator = EvaluatorAgent(str(tmp_path))
+
+        result = evaluator._read_file("link/secret.txt")
+
+        assert result.startswith("Error:")
+        assert "top-secret" not in result
+
+    def test_process_response_tolerates_missing_criteria_keys(self, tmp_path: Path) -> None:
+        """criteria 항목에 키가 없어도 KeyError 없이 폴백한다."""
+        evaluator = EvaluatorAgent(str(tmp_path))
+        payload = json.dumps({
+            "passed": True,
+            "overall_score": 7.0,
+            "criteria": [{"name": "functionality"}, "not-a-dict"],
+        })
+
+        result = evaluator.process_response(payload)
+
+        assert result.passed
+        assert len(result.criteria_scores) == 1
+        assert result.criteria_scores[0].name == "functionality"
+        assert result.criteria_scores[0].score == 0.0

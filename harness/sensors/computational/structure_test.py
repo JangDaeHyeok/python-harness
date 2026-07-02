@@ -54,30 +54,46 @@ class StructureAnalyzer:
     """
 
     def __init__(self, project_dir: str) -> None:
+        # __init__에서 부수 효과(파일 IO) 금지: 로드는 첫 접근 시 지연 수행한다.
         self.project_dir = Path(project_dir)
-        self.rules: list[dict[str, Any]] = []
-        self.adrs: list[ADREntry] = []
-        self._load_config()
-        self._load_adrs()
+        self._rules: list[dict[str, Any]] | None = None
+        self._adrs: list[ADREntry] | None = None
 
-    def _load_config(self) -> None:
+    @property
+    def rules(self) -> list[dict[str, Any]]:
+        """규칙을 지연 로드해 반환한다."""
+        if self._rules is None:
+            self._rules = self._load_config()
+        return self._rules
+
+    @property
+    def adrs(self) -> list[ADREntry]:
+        """ADR을 지연 로드해 반환한다."""
+        if self._adrs is None:
+            self._adrs = self._load_adrs()
+        return self._adrs
+
+    def _load_config(self) -> list[dict[str, Any]]:
         """harness_structure.yaml에서 규칙을 로드한다."""
         config_path = self.project_dir / "harness_structure.yaml"
         if not config_path.exists():
-            return
+            return []
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        self.rules = data.get("rules", [])
+        rules = data.get("rules", [])
+        return rules if isinstance(rules, list) else []
 
-    def _load_adrs(self) -> None:
+    def _load_adrs(self) -> list[ADREntry]:
         """docs/adr/ 디렉터리에서 ADR을 로드한다."""
         adr_dir = self.project_dir / "docs" / "adr"
         if not adr_dir.exists():
-            return
+            return []
+        adrs: list[ADREntry] = []
         for adr_file in sorted(adr_dir.glob("*.md")):
             adr = self._parse_adr(adr_file)
             if adr:
-                self.adrs.append(adr)
+                adrs.append(adr)
+        return adrs
 
     def _parse_adr(self, path: Path) -> ADREntry | None:
         """ADR 마크다운 파일을 파싱한다."""
